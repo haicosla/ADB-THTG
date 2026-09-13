@@ -1,0 +1,31 @@
+[
+  {
+    "action": "ocr_text",
+    "box": [
+      0.1946,
+      0.1302,
+      0.3611,
+      0.1611
+    ],
+    "var": "ocr_text",
+    "lang": "vie+eng",
+    "repeat": 1,
+    "delay": 0.5,
+    "comment": "OCR vùng -> biến ocr_text"
+  },
+  {
+    "action": "show_popup",
+    "message": "\"{ocr_text}\"",
+    "duration": 2.0,
+    "repeat": 1,
+    "delay": 0.1,
+    "comment": "Thông báo (tự tắt 2.0s): \"{ocr_text}\""
+  },
+  {
+    "action": "type_text",
+    "text": "\"{ocr_text}\"",
+    "repeat": 1,
+    "delay": 0.5,
+    "comment": "Gõ: \"{ocr_text}\""
+  }
+]

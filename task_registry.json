@@ -1,0 +1,18 @@
+[
+  {
+    "id": "Đá gà",
+    "ten_hien_thi": "Đá Gà",
+    "muc": "1",
+    "thu_tu": 1,
+    "mac_dinh_bat": true,
+    "file_json": "C:/Users/HL2020/Desktop/LD/TiemTapHoa_OperationRecorder_V1/files 10/tasks/Đá gà.json"
+  },
+  {
+    "id": "like hội",
+    "ten_hien_thi": "Like Hội",
+    "muc": "2",
+    "thu_tu": 1,
+    "mac_dinh_bat": true,
+    "file_json": "C:/Users/HL2020/Desktop/LD/TiemTapHoa_OperationRecorder_V1/files 10/tasks/like hội.json"
+  }
+]

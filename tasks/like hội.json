@@ -1,0 +1,170 @@
+[
+  {
+    "action": "tap",
+    "pos": [
+      0.1186,
+      0.94
+    ],
+    "repeat": 1,
+    "delay": 0.9,
+    "comment": "Tap [11%, 94%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.2583,
+      0.9569
+    ],
+    "repeat": 1,
+    "delay": 1.3,
+    "comment": "Tap [25%, 95%]"
+  },
+  {
+    "action": "swipe",
+    "from": [
+      0.8784,
+      0.587
+    ],
+    "to": [
+      0.2117,
+      0.6132
+    ],
+    "duration": 1920,
+    "repeat": 1,
+    "delay": 2.08,
+    "comment": "Swipe [87%]->[21%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.7778,
+      0.549
+    ],
+    "repeat": 1,
+    "delay": 0.62,
+    "comment": "Tap [77%, 54%]"
+  },
+  {
+    "action": "swipe",
+    "from": [
+      0.3679,
+      0.4037
+    ],
+    "to": [
+      0.8634,
+      0.6883
+    ],
+    "duration": 760,
+    "repeat": 1,
+    "delay": 1.51,
+    "comment": "Swipe [36%]->[86%]"
+  },
+  {
+    "action": "swipe",
+    "from": [
+      0.2583,
+      0.3235
+    ],
+    "to": [
+      0.8408,
+      0.6976
+    ],
+    "duration": 650,
+    "repeat": 1,
+    "delay": 0.84,
+    "comment": "Swipe [25%]->[84%]"
+  },
+  {
+    "action": "swipe",
+    "from": [
+      0.2973,
+      0.5819
+    ],
+    "to": [
+      0.7312,
+      0.7086
+    ],
+    "duration": 390,
+    "repeat": 1,
+    "delay": 1.97,
+    "comment": "Swipe [29%]->[73%]"
+  },
+  {
+    "action": "swipe",
+    "from": [
+      0.8754,
+      0.6934
+    ],
+    "to": [
+      0.3799,
+      0.6512
+    ],
+    "duration": 730,
+    "repeat": 1,
+    "delay": 1.01,
+    "comment": "Swipe [87%]->[37%]"
+  },
+  {
+    "action": "swipe",
+    "from": [
+      0.7883,
+      0.6579
+    ],
+    "to": [
+      0.4054,
+      0.641
+    ],
+    "duration": 1460,
+    "repeat": 1,
+    "delay": 1.21,
+    "comment": "Swipe [78%]->[40%]"
+  },
+  {
+    "action": "group_start",
+    "delay": 0.1,
+    "comment": "Nhóm lặp",
+    "repeat": 15,
+    "repeat_mode": "count"
+  },
+  {
+    "action": "multi_image",
+    "templates": [
+      "icon_27x31_58488.png",
+      "icon_38x37_54743.png",
+      "icon_100x100_51161.png"
+    ],
+    "timeout": 3,
+    "conf": 0.6,
+    "click": true,
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Quét song song (3 ảnh)"
+  },
+  {
+    "action": "wait_image",
+    "template": "icon_38x37_54743.png",
+    "timeout": 3,
+    "conf": 0.6,
+    "click": true,
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Click ảnh: icon_38x37_54743.png",
+    "repeat_mode": "count"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.7303,
+      0.0674
+    ],
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Tap"
+  },
+  {
+    "action": "group_end",
+    "repeat": 1,
+    "delay": 0.1,
+    "comment": "Đóng nhóm"
+  }
+]

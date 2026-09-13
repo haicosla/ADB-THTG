@@ -1,0 +1,472 @@
+import os
+import subprocess
+import shutil
+import cv2
+import numpy as np
+import psutil
+
+try:
+    import pytesseract
+    _HAS_PYTESSERACT_LIB = True
+except ImportError:
+    pytesseract = None
+    _HAS_PYTESSERACT_LIB = False
+
+# Các đường dẫn cài đặt Tesseract-OCR phổ biến trên Windows - thử lần lượt
+# trước khi trông chờ vào PATH hệ thống.
+_TESSERACT_CANDIDATE_PATHS = [
+    r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+    r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+]
+
+_HAS_TESSERACT = False
+_TESSERACT_INIT_ERROR = ""
+
+if _HAS_PYTESSERACT_LIB:
+    _found_path = next((p for p in _TESSERACT_CANDIDATE_PATHS if os.path.exists(p)), None)
+    if not _found_path:
+        _found_path = shutil.which("tesseract")
+    if _found_path:
+        pytesseract.pytesseract.tesseract_cmd = _found_path
+
+    # QUAN TRỌNG: TRƯỚC ĐÂY cứ import được thư viện pytesseract là coi như
+    # "_HAS_TESSERACT = True" và ép cứng tesseract_cmd vào 1 đường dẫn cố
+    # định, KHÔNG hề kiểm tra file đó có thật sự tồn tại/chạy được không.
+    # Nếu người dùng cài Tesseract-OCR ở nơi khác (vd Program Files (x86),
+    # hoặc không cài ở nơi mặc định), mọi lần OCR sẽ ngầm lỗi - lỗi đó vẫn bị
+    # try/except bên trong ocr_text_in_box() bắt lại và trả về chuỗi lỗi, NÊN
+    # KHÔNG PHẢI nguyên nhân của việc biến OCR ra "" (rỗng) mà không có lỗi
+    # gì hiển thị - nếu bạn thấy log ghi 'OCR -> biến ... = ""' (rỗng, không
+    # có dòng "Lỗi khi quét OCR"), nghĩa là Tesseract ĐÃ CHẠY nhưng KHÔNG ĐỌC
+    # RA CHỮ NÀO trong vùng đã cắt (xem ocr_text_in_box() bên dưới để biết
+    # cách chẩn đoán qua ảnh debug đã lưu). Việc kiểm tra thật sự bằng
+    # get_tesseract_version() ở đây chỉ để phát hiện SỚM trường hợp Tesseract
+    # hoàn toàn chưa cài/không gọi được, và báo lỗi rõ ràng thay vì im lặng.
+    try:
+        pytesseract.get_tesseract_version()
+        _HAS_TESSERACT = True
+    except Exception as e:
+        _HAS_TESSERACT = False
+        _TESSERACT_INIT_ERROR = str(e)
+else:
+    _TESSERACT_INIT_ERROR = "Chưa cài thư viện pytesseract (pip install pytesseract)"
+
+
+class ADBHelper:
+    def __init__(self):
+        self.adb_path = self.detect_adb()
+        self.device_id = None
+        self.screen_w = 720
+        self.screen_h = 1280
+        self._sdk_version = None
+
+    def detect_adb(self):
+        for proc in psutil.process_iter(['name', 'exe']):
+            try:
+                if proc.info['name'] and 'dnplayer.exe' in proc.info['name'].lower():
+                    ld_dir = os.path.dirname(proc.info['exe'])
+                    candidate = os.path.join(ld_dir, "adb.exe")
+                    if os.path.exists(candidate):
+                        return candidate
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        for path in [r"C:\leidian\LDPlayer9\adb.exe", r"D:\leidian\LDPlayer9\adb.exe"]:
+            if os.path.exists(path):
+                return path
+        return "adb"
+
+    def run_cmd(self, args):
+        cmd = [self.adb_path]
+        if self.device_id:
+            cmd.extend(["-s", self.device_id])
+        cmd.extend(args)
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
+        return proc.stdout
+
+    def run_cmd_full(self, args):
+        """Giống run_cmd nhưng trả về (stdout_text, stderr_text, returncode).
+        Cần dùng khi phải BIẾT CHẮC lệnh adb có thật sự chạy thành công hay
+        không (vd input keycombination) - subprocess.run mặc định không tự
+        ném exception khi tiến trình adb trả về lỗi, nên nếu chỉ dùng
+        run_cmd() thông thường thì lỗi sẽ bị bỏ qua trong im lặng."""
+        cmd = [self.adb_path]
+        if self.device_id:
+            cmd.extend(["-s", self.device_id])
+        cmd.extend(args)
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
+        out = proc.stdout.decode("utf-8", errors="ignore")
+        err = proc.stderr.decode("utf-8", errors="ignore")
+        return out, err, proc.returncode
+
+    def get_sdk_version(self):
+        """Trả về SDK version (vd 28, 31) của thiết bị hiện tại, có cache lại.
+        Dùng để biết trước liệu 'input keycombination' (Ctrl+phím giữ đồng
+        thời) có được hỗ trợ hay không - lệnh này CHỈ chạy được từ Android 12
+        (API 31) trở lên."""
+        if self._sdk_version is not None:
+            return self._sdk_version
+        try:
+            out, _, rc = self.run_cmd_full(["shell", "getprop", "ro.build.version.sdk"])
+            self._sdk_version = int(out.strip()) if rc == 0 else 0
+        except Exception:
+            self._sdk_version = 0
+        return self._sdk_version
+
+    def is_keycombo_supported(self):
+        return self.get_sdk_version() >= 31
+
+    def get_devices(self):
+        try:
+            out = self.run_cmd(["devices"]).decode("utf-8", errors="ignore")
+            lines = out.strip().split("\n")[1:]
+            return [l.split()[0] for l in lines if "\tdevice" in l]
+        except Exception:
+            return []
+
+    def update_resolution(self):
+        try:
+            out = self.run_cmd(["shell", "wm", "size"]).decode("utf-8", errors="ignore")
+            for line in out.splitlines():
+                if "Physical size:" in line or "Override size:" in line:
+                    parts = line.split(":")[-1].strip().split("x")
+                    self.screen_w = int(parts[0])
+                    self.screen_h = int(parts[1])
+        except Exception:
+            pass
+
+        # QUAN TRỌNG - LÝ DO "chạy ở Dashboard bị lệch tọa độ, chạy ở app
+        # chính (gui.py) vẫn đúng":
+        # `adb shell wm size` trả về kích thước LOGIC của Android, đôi khi
+        # KHÁC với kích thước PIXEL THẬT của ảnh chụp màn hình (vd do
+        # LDPlayer áp DPI/resolution override cho từng giả lập) - trong khi
+        # tap()/swipe() tính toạ độ pixel bằng cách nhân tỉ lệ (0..1) với
+        # self.screen_w/h, và tỉ lệ (0..1) đó lại được TẠO RA lúc ghi/chọn
+        # điểm trên khung preview trong gui.py dựa trên đúng KÍCH THƯỚC ẢNH
+        # CHỤP MÀN HÌNH thật (screencap), KHÔNG dựa trên 'wm size'.
+        # Nếu 2 kích thước lệch nhau dù chỉ 1 chút, MỌI thao tác tap/swipe
+        # phát lại sẽ bị lệch tọa độ theo đúng tỉ lệ lệch đó.
+        # - Ở app chính (gui.py): trước khi người dùng bấm "Chạy Thử", màn
+        #   hình Preview đã tự chụp/refresh nhiều lần rồi (Live/preview),
+        #   nên self.screen_w/h ĐÃ ĐƯỢC ảnh chụp thật ghi đè đúng từ trước.
+        # - Ở Dashboard (đa luồng): mỗi luồng tạo ADBHelper() MỚI rồi chạy
+        #   kịch bản NGAY, chưa từng chụp màn hình lần nào trước đó, nên vẫn
+        #   dùng nguyên số liệu (có thể sai) từ 'wm size' cho tới tận bước
+        #   ảnh đầu tiên (wait_image/if_image) - nếu kịch bản có TAP/SWIPE
+        #   trước bước ảnh đầu tiên thì các bước đó sẽ bị lệch.
+        # -> Luôn chụp thử 1 tấm ảnh THẬT ngay tại đây để screen_w/h khớp
+        # đúng kích thước pixel thật ngay từ đầu, bất kể gọi từ đâu.
+        try:
+            self.screencap_fast()
+        except Exception:
+            pass
+
+    def tap(self, x, y):
+        if 0.0 <= float(x) <= 1.0 and 0.0 <= float(y) <= 1.0:
+            rx = int(float(x) * self.screen_w)
+            ry = int(float(y) * self.screen_h)
+        else:
+            rx = int(float(x))
+            ry = int(float(y))
+        self.run_cmd(["shell", "input", "tap", str(rx), str(ry)])
+
+    def swipe(self, x1, y1, x2, y2, duration_ms=250):
+        if 0.0 <= float(x1) <= 1.0 and 0.0 <= float(y1) <= 1.0:
+            rx1 = int(float(x1) * self.screen_w)
+            ry1 = int(float(y1) * self.screen_h)
+            rx2 = int(float(x2) * self.screen_w)
+            ry2 = int(float(y2) * self.screen_h)
+        else:
+            rx1, ry1 = int(float(x1)), int(float(y1))
+            rx2, ry2 = int(float(x2)), int(float(y2))
+        self.run_cmd(["shell", "input", "swipe", str(rx1), str(ry1), str(rx2), str(ry2), str(int(duration_ms))])
+
+    def screencap_fast(self):
+        cmd = [self.adb_path]
+        if self.device_id:
+            cmd.extend(["-s", self.device_id])
+        cmd.extend(["exec-out", "screencap", "-p"])
+
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, startupinfo=startupinfo)
+        raw_bytes, _ = proc.communicate()
+
+        if not raw_bytes:
+            return None
+        arr = np.frombuffer(raw_bytes, np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is not None:
+            self.screen_h, self.screen_w = img.shape[:2]
+        return img
+
+    def find_image_on_screen(self, template_cv, threshold=0.80):
+        screen = self.screencap_fast()
+        if screen is None or template_cv is None:
+            return None, 0.0
+
+        s_gray = cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY) if len(screen.shape) == 3 else screen
+        t_gray = cv2.cvtColor(template_cv, cv2.COLOR_BGR2GRAY) if len(template_cv.shape) == 3 else template_cv
+
+        res = cv2.matchTemplate(s_gray, t_gray, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(res)
+
+        if max_val >= threshold:
+            h, w = t_gray.shape[:2]
+            cx = max_loc[0] + w // 2
+            cy = max_loc[1] + h // 2
+            return (round(cx / self.screen_w, 4), round(cy / self.screen_h, 4)), max_val
+        return None, max_val
+
+    def find_any_image_on_screen(self, templates_dict, threshold=0.80):
+        screen = self.screencap_fast()
+        if screen is None:
+            return None, None, 0.0
+
+        s_gray = cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY) if len(screen.shape) == 3 else screen
+
+        best_name = None
+        best_pos = None
+        highest_score = 0.0
+
+        for name, t_cv in templates_dict.items():
+            if t_cv is None:
+                continue
+            t_gray = cv2.cvtColor(t_cv, cv2.COLOR_BGR2GRAY) if len(t_cv.shape) == 3 else t_cv
+            res = cv2.matchTemplate(s_gray, t_gray, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(res)
+
+            if max_val >= threshold and max_val > highest_score:
+                highest_score = max_val
+                h, w = t_gray.shape[:2]
+                cx = max_loc[0] + w // 2
+                cy = max_loc[1] + h // 2
+                best_name = name
+                best_pos = (round(cx / self.screen_w, 4), round(cy / self.screen_h, 4))
+
+        return best_name, best_pos, highest_score
+
+    # ---- BÀN PHÍM (mới) ----
+    @staticmethod
+    def _is_ascii(text):
+        try:
+            text.encode("ascii")
+            return True
+        except UnicodeEncodeError:
+            return False
+
+    def get_current_ime(self):
+        """Trả về ID bàn phím (IME) đang được đặt làm mặc định trên thiết bị,
+        vd 'com.android.adbkeyboard/.AdbIME' nếu đã bật ADBKeyboard."""
+        try:
+            out = self.run_cmd(["shell", "settings", "get", "secure", "default_input_method"])
+            return out.decode("utf-8", errors="ignore").strip()
+        except Exception:
+            return ""
+
+    def is_adbkeyboard_active(self):
+        return "adbkeyboard" in self.get_current_ime().lower()
+
+    def is_adbkeyboard_installed(self):
+        try:
+            out = self.run_cmd(["shell", "pm", "list", "packages", "com.android.adbkeyboard"])
+            return b"com.android.adbkeyboard" in out
+        except Exception:
+            return False
+
+    def enable_adbkeyboard(self):
+        """Bật ADBKeyboard làm bàn phím ĐANG DÙNG trên thiết bị - cần cài
+        sẵn ADBKeyboard.apk từ trước (xem is_adbkeyboard_installed)."""
+        self.run_cmd(["shell", "ime", "enable", "com.android.adbkeyboard/.AdbIME"])
+        self.run_cmd(["shell", "ime", "set", "com.android.adbkeyboard/.AdbIME"])
+
+    def _input_text_via_adbkeyboard(self, text):
+        """Gõ chữ CÓ DẤU (Unicode) qua broadcast tới bàn phím ảo ADBKeyboard
+        (https://github.com/senzhk/ADBKeyBoard) - vì `adb shell input text`
+        gốc của Android CHỈ hỗ trợ ký tự ASCII, ký tự có dấu (tiếng Việt...)
+        bị coi là không hợp lệ và ADB ÂM THẦM BỎ QUA (không báo lỗi gì) -
+        đây là lý do các bước Gõ Chữ có dấu trước đây "chạy xong" trong log
+        nhưng không thấy chữ nào xuất hiện trên máy ảo. Gửi dạng base64 qua
+        action ADB_INPUT_B64 để không phải tự escape khoảng trắng/ký tự đặc
+        biệt/Unicode như input text thường."""
+        import base64
+        b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
+        self.run_cmd(["shell", "am", "broadcast", "-a", "ADB_INPUT_B64", "--es", "msg", b64])
+
+    def input_text(self, text):
+        """Gõ một chuỗi ký tự lên thiết bị.
+
+        - Chữ THUẦN ASCII (không dấu): dùng `adb shell input text` như cũ -
+          nhanh, không cần cài thêm gì.
+        - Chữ CÓ DẤU (tiếng Việt, kết quả OCR...) VÀ máy ảo đã cài + bật sẵn
+          ADBKeyboard: gửi qua ADBKeyboard để gõ đúng dấu.
+        - Chữ có dấu mà CHƯA có ADBKeyboard: TRƯỚC ĐÂY sẽ âm thầm gọi
+          `input text` và Android lặng lẽ bỏ qua các ký tự có dấu (không báo
+          lỗi, không gõ ra gì) - người dùng thấy log "chạy xong" nhưng chữ
+          không hề xuất hiện, tưởng là bug. GIỜ báo lỗi rõ ràng ngay tại đây
+          để biết chính xác cần làm gì (xem nút '⌨️ Cài/Bật ADBKeyboard' trên
+          giao diện)."""
+        if not text:
+            return
+        if self._is_ascii(text):
+            escaped = text.replace(" ", "%s")
+            for ch in ['&', '<', '>', '|', ';', '(', ')', '"', "'", '$', '`', '\\']:
+                escaped = escaped.replace(ch, "\\" + ch)
+            self.run_cmd(["shell", "input", "text", escaped])
+            return
+
+        if self.is_adbkeyboard_active():
+            self._input_text_via_adbkeyboard(text)
+            return
+
+        raise RuntimeError(
+            "Chữ cần gõ có dấu (vd tiếng Việt) nhưng lệnh gõ chữ mặc định của Android "
+            "('adb shell input text') KHÔNG hỗ trợ ký tự có dấu, và máy ảo CHƯA bật bàn "
+            "phím ADBKeyboard để gõ được Unicode. Bấm nút '⌨️ Cài/Bật ADBKeyboard' trên "
+            "giao diện để xem hướng dẫn cài đặt."
+        )
+
+    def key_event(self, keycode):
+        """Gửi 1 phím đơn lẻ, vd 'KEYCODE_ENTER', 'KEYCODE_A'."""
+        self.run_cmd(["shell", "input", "keyevent", keycode])
+
+    # ---- OCR (mới) ----
+    def check_ocr_setup(self):
+        """Trả về (ok: bool, message: str) - dùng cho nút '🔍 Kiểm Tra OCR'
+        trên giao diện để CHẨN ĐOÁN NHANH lý do OCR không hoạt động, thay vì
+        phải đoán mò qua từng lần chạy macro."""
+        if not _HAS_PYTESSERACT_LIB:
+            return False, "Chưa cài thư viện Python 'pytesseract'.\nChạy: pip install pytesseract"
+        if not _HAS_TESSERACT:
+            return False, (
+                "Có thư viện pytesseract nhưng KHÔNG gọi được chương trình Tesseract-OCR "
+                "(đây là 1 chương trình riêng, không phải thư viện Python).\n\n"
+                f"Chi tiết lỗi: {_TESSERACT_INIT_ERROR}\n\n"
+                "Cách khắc phục: cài Tesseract-OCR tại "
+                "https://github.com/UB-Mannheim/tesseract/wiki, hoặc nếu đã cài mà vẫn "
+                "báo lỗi này, hãy sửa biến pytesseract.pytesseract.tesseract_cmd trong "
+                "adb_helper.py trỏ đúng tới nơi cài đặt file tesseract.exe của bạn."
+            )
+        try:
+            version = pytesseract.get_tesseract_version()
+        except Exception as e:
+            return False, f"Tesseract báo cài rồi nhưng gọi thử bị lỗi: {e}"
+        try:
+            langs = pytesseract.get_languages(config="")
+        except Exception:
+            langs = []
+        missing = [l for l in ("vie", "eng") if langs and l not in langs]
+        msg = f"✔ Tesseract-OCR hoạt động bình thường (phiên bản {version}).\n"
+        msg += f"Đường dẫn: {pytesseract.pytesseract.tesseract_cmd}\n"
+        msg += f"Ngôn ngữ đã cài: {', '.join(langs) if langs else '(không đọc được danh sách)'}"
+        if missing:
+            msg += (f"\n\n⚠️ CHƯA cài gói ngôn ngữ: {', '.join(missing)}."
+                    " Nếu kịch bản đang quét với lang='vie+eng' mà thiếu gói 'vie', "
+                    "Tesseract sẽ báo LỖI (không phải rỗng) khi quét - cài thêm traineddata "
+                    "tương ứng tại https://github.com/tesseract-ocr/tessdata")
+        msg += ("\n\nLƯU Ý: nếu bước Quét OCR trong kịch bản trả về BIẾN RỖNG (\"\") mà KHÔNG "
+                "kèm dòng lỗi trong Nhật Ký Chạy, nghĩa là Tesseract ĐÃ CHẠY nhưng không đọc "
+                "ra chữ nào trong vùng đã chọn - hãy mở 2 file "
+                "logs/last_ocr_crop.png (vùng vừa cắt) và logs/last_ocr_crop_bin.png (ảnh đã "
+                "xử lý đưa vào Tesseract) được lưu lại sau MỖI lần quét để kiểm tra xem vùng "
+                "chọn có đúng chỗ có chữ hay không, và chữ có còn rõ nét sau xử lý hay không.")
+        return True, msg
+
+    def ocr_text_in_box(self, screen_img, box, lang="vie+eng", debug_dir="logs"):
+        """Quét chữ (OCR) trong 1 vùng box=(x1,y1,x2,y2) tính bằng pixel trên
+        ảnh chụp màn hình. Cần cài thư viện pytesseract (pip install
+        pytesseract) VÀ cài chương trình Tesseract-OCR riêng (không phải thư
+        viện Python) từ https://github.com/UB-Mannheim/tesseract/wiki.
+
+        CẢI TIẾN so với trước:
+        1. LUÔN lưu lại ảnh vùng vừa cắt ra 'logs/last_ocr_crop.png' và ảnh
+           đã xử lý nhị phân dùng để đưa vào Tesseract ra
+           'logs/last_ocr_crop_bin.png' sau MỖI lần quét - để chẩn đoán được
+           BẰNG MẮT khi kết quả trả về rỗng: có phải do chọn sai vùng, hay do
+           chữ mờ/nhỏ sau xử lý. Trước đây quét ra rỗng là hết cách kiểm tra.
+        2. Xử lý ảnh kỹ hơn (phóng to 3x + khử nhiễu nhẹ + nhị phân hóa Otsu)
+           thay vì chỉ resize ảnh xám thô - chữ nhỏ/nhiều màu trong UI game là
+           lý do phổ biến nhất khiến Tesseract mặc định đọc ra rỗng.
+        3. Thử cả 2 chiều màu (chữ sáng nền tối / chữ tối nền sáng) vì không
+           biết trước UI game dùng kiểu nào, rồi lấy kết quả dài nhất.
+        """
+        if not _HAS_TESSERACT:
+            reason = _TESSERACT_INIT_ERROR or "Chưa cài Tesseract-OCR."
+            raise RuntimeError(f"OCR chưa sẵn sàng: {reason}")
+
+        x1, y1, x2, y2 = box
+        crop = screen_img[y1:y2, x1:x2]
+        if crop.size == 0:
+            raise RuntimeError(f"Vùng cắt rỗng (box pixel={box}) - có thể tọa độ vùng quét bị sai.")
+
+        try:
+            os.makedirs(debug_dir, exist_ok=True)
+            cv2.imwrite(os.path.join(debug_dir, "last_ocr_crop.png"), crop)
+        except Exception:
+            pass
+
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
+        gray = cv2.resize(gray, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
+        gray = cv2.bilateralFilter(gray, 5, 40, 40)
+
+        _, bin_normal = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        bin_inverted = cv2.bitwise_not(bin_normal)
+
+        try:
+            cv2.imwrite(os.path.join(debug_dir, "last_ocr_crop_bin.png"), bin_normal)
+        except Exception:
+            pass
+
+        candidates = []
+        for img_variant in (bin_normal, bin_inverted, gray):
+            try:
+                txt = pytesseract.image_to_string(img_variant, lang=lang, config="--psm 6").strip()
+            except Exception as e:
+                txt = f"[Lỗi OCR: {e}]"
+                # Nếu Tesseract lỗi thật sự (vd thiếu gói ngôn ngữ), báo lỗi
+                # ngay thay vì lặng lẽ thử tiếp các biến thể khác - lỗi ngôn
+                # ngữ sẽ giống nhau ở cả 3 lần thử nên báo sớm cho rõ ràng.
+                raise RuntimeError(str(e))
+            candidates.append(txt)
+
+        # Chọn kết quả DÀI NHẤT trong các lần thử (bình thường / đảo màu /
+        # xám thô không nhị phân) - cách đơn giản nhưng khá hiệu quả để tự
+        # chọn bản đọc tốt nhất khi không biết trước UI sáng/tối.
+        best = max(candidates, key=len) if candidates else ""
+        return best
+
+    def send_key_combo(self, keycodes):
+        """Gửi tổ hợp phím, vd ['KEYCODE_CTRL_LEFT', 'KEYCODE_A'] (Ctrl+A).
+
+        Lưu ý quan trọng: lệnh `adb shell input keycombination` chỉ được hỗ trợ
+        trên Android 12 (API 31) trở lên - đây là giới hạn của chính Android,
+        không phải lỗi code. TRƯỚC ĐÂY: run_cmd() không kiểm tra returncode/
+        stderr, nên khi lệnh thất bại trên máy ảo Android cũ, Python không hề
+        biết là nó đã lỗi -> nhánh "gửi rời rạc từng phím" phía dưới KHÔNG BAO
+        GIỜ được kích hoạt -> tổ hợp phím im lặng không có tác dụng gì. Giờ
+        kiểm tra SDK version + returncode/stderr thật để biết chắc chắn."""
+        if not keycodes:
+            return
+        if len(keycodes) == 1:
+            self.key_event(keycodes[0])
+            return
+
+        sdk = self.get_sdk_version()
+        if sdk >= 31:
+            _, err, rc = self.run_cmd_full(["shell", "input", "keycombination"] + list(keycodes))
+            if rc == 0 and not err.strip():
+                return
+            print(f"[CẢNH BÁO] 'input keycombination' báo lỗi dù SDK={sdk} (rc={rc}, err={err.strip()}). "
+                  f"Sẽ gửi rời rạc từng phím thay thế.")
+        else:
+            print(f"[CẢNH BÁO] Thiết bị đang chạy Android SDK {sdk} (< 12/API 31) nên KHÔNG hỗ trợ "
+                  f"giữ đồng thời nhiều phím qua adb. Gửi rời rạc {keycodes} - với tổ hợp có Ctrl/Alt/Shift, "
+                  f"rất nhiều app sẽ KHÔNG nhận ra vì phím bổ trợ đã nhả trước khi phím chính được gửi. "
+                  f"Cách khắc phục triệt để: đổi image hệ điều hành của máy ảo LDPlayer sang bản Android 12+ "
+                  f"(LDPlayer 9 hỗ trợ chọn khi tạo máy ảo mới).")
+
+        for kc in keycodes:
+            self.key_event(kc)

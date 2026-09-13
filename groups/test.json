@@ -1,0 +1,41 @@
+[
+  {
+    "action": "wait_image",
+    "template": "icon_60x60_43036.png",
+    "timeout": 8,
+    "conf": 0.8,
+    "click": true,
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Click ảnh: icon_60x60_43036.png"
+  },
+  {
+    "action": "if_image",
+    "template": "icon_60x60_41165.png",
+    "timeout": 2,
+    "conf": 0.8,
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Nếu thấy [icon_60x60_41165.png]"
+  },
+  {
+    "action": "wait_image",
+    "template": "icon_60x60_41165.png",
+    "timeout": 8,
+    "conf": 0.8,
+    "click": true,
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Click ảnh: icon_60x60_41165.png"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      360.0,
+      640.0
+    ],
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Tap (360.0, 640.0)"
+  }
+]

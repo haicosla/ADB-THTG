@@ -1,0 +1,32 @@
+[
+  {
+    "action": "wait_image",
+    "template": "icon_100x100_18866.png",
+    "timeout": 8,
+    "conf": 0.8,
+    "click": true,
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Click ảnh: icon_100x100_18866.png"
+  },
+  {
+    "action": "wait_image",
+    "template": "icon_100x100_18893.png",
+    "timeout": 8,
+    "conf": 0.8,
+    "click": true,
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Click ảnh: icon_100x100_18893.png"
+  },
+  {
+    "action": "wait_image",
+    "template": "icon_100x100_18927.png",
+    "timeout": 8,
+    "conf": 0.8,
+    "click": true,
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Click ảnh: icon_100x100_18927.png"
+  }
+]
