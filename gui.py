@@ -10,6 +10,7 @@ from PIL import Image, ImageTk
 from pynput import keyboard
 
 from adb_helper import ADBHelper
+from emulator_manager import EmulatorManager
 from logic_engine import LogicEngine, BreakGroupSignal, ContinueGroupSignal
 from window_finder import WindowFinder
 from recorder import LiveRecorder, parse_key_combo_text
@@ -383,6 +384,19 @@ class MacroStudioApp:
 
         self.adb = ADBHelper()
         self.window_finder = WindowFinder(self.adb)
+        # LỖI ĐÃ TÌM RA: đổi giả lập ở ô "Thiết bị" chỉ đổi được lệnh ADB
+        # (nên Preview đổi đúng) nhưng KHÔNG hề đổi cửa sổ đang gắn để ghi F7
+        # - window_finder.find_ld_windows() quét MÙ, luôn bắt cửa sổ LDPlayer
+        # ĐẦU TIÊN tìm thấy trên toàn hệ thống bất kể đang chọn giả lập nào,
+        # nên khi mở NHIỀU giả lập cùng lúc, F7 luôn ghi vào ĐÚNG 1 giả lập
+        # cố định (thường là giả lập mở đầu tiên) dù đã đổi ô chọn - đúng
+        # như hiện tượng người dùng phát hiện ra ("tên giả lập bên cạnh
+        # không đổi"). Nay dùng EmulatorManager (qua ldconsole list2) để biết
+        # CHÍNH XÁC hwnd cửa sổ ứng với TỪNG serial ADB, rồi gọi
+        # window_finder.attach_hwnd() thẳng vào đúng cửa sổ đó mỗi khi đổi
+        # giả lập - không còn đoán mò nữa.
+        self.emulator_manager = EmulatorManager(self.adb)
+        self._device_hwnd_map = {}  # serial ADB -> EmulatorInfo (có .hwnd, .name)
 
         self.steps = []
         self.current_screen_cv = None
@@ -894,6 +908,20 @@ class MacroStudioApp:
             menu.add_command(label=f"⌨️ Sửa Nội Dung Gõ ({step.get('text', '')})", 
                              command=lambda: self._edit_step_field(idx, "text_content"))
 
+        elif act == "swipe":
+            # THIẾU TRƯỚC ĐÂY: swipe không có menu sửa nào cả (không sửa được
+            # Duration sau khi tạo). Nay thêm cả Duration lẫn "Giữ Cuối" -
+            # giữ yên tay tại điểm đến 1 khoảng ngắn trước khi nhả, để KÉO
+            # THANH TRƯỢT (slider) không bị game hiểu nhầm thành vuốt/ném rồi
+            # bật ngược lại (xem docstring adb_helper.py::swipe_hold()).
+            menu.add_separator()
+            menu.add_command(label=f"⏳ Sửa Thời Gian Kéo - Duration ({step.get('duration', 250)}ms)",
+                             command=lambda: self._edit_step_field(idx, "swipe_duration"))
+            hold_ms = step.get("hold_ms", 0)
+            hold_txt = f"{hold_ms}ms" if hold_ms else "TẮT (swipe thường)"
+            menu.add_command(label=f"🐢 Sửa Giữ Cuối - chống bật ngược thanh trượt ({hold_txt})",
+                             command=lambda: self._edit_step_field(idx, "swipe_hold_ms"))
+
         menu.add_separator()
         menu.add_command(label="❌ Xóa Bước Này", command=self.delete_selected_step)
 
@@ -927,6 +955,30 @@ class MacroStudioApp:
             new_val = simpledialog.askfloat("Sửa Delay", "Thời gian delay sau bước (giây):", initialvalue=step.get("delay", 1.0), minvalue=0.0, maxvalue=60.0)
             if new_val is not None:
                 step["delay"] = round(new_val, 2)
+        elif field_type == "swipe_duration":
+            new_val = simpledialog.askinteger(
+                "Sửa Thời Gian Kéo",
+                "Thời gian DI CHUYỂN từ điểm đầu tới điểm cuối (mili-giây):",
+                initialvalue=step.get("duration", 250), minvalue=50, maxvalue=5000
+            )
+            if new_val is not None:
+                step["duration"] = new_val
+        elif field_type == "swipe_hold_ms":
+            new_val = simpledialog.askinteger(
+                "Sửa Giữ Cuối (chống bật ngược thanh trượt)",
+                "Thời gian GIỮ YÊN tại điểm đến trước khi nhả tay (mili-giây).\n"
+                "Đặt 0 = TẮT, dùng lệnh 'input swipe' bình thường (nhả tay\n"
+                "ngay khi vừa tới nơi - phù hợp kéo màn hình/danh sách).\n"
+                "Đặt > 0 (khuyên dùng 150-300) = kéo qua nhiều điểm mượt rồi\n"
+                "GIỮ YÊN thêm 1 chút mới nhả tay - dùng khi kéo THANH TRƯỢT\n"
+                "(slider) mà kéo bình thường bị game bật ngược lại vị trí cũ.",
+                initialvalue=step.get("hold_ms", 0), minvalue=0, maxvalue=2000
+            )
+            if new_val is not None:
+                if new_val > 0:
+                    step["hold_ms"] = new_val
+                else:
+                    step.pop("hold_ms", None)
         elif field_type == "conf":
             new_val = simpledialog.askfloat("Sửa Độ Khớp", "Độ chính xác (0.50 - 0.99):", initialvalue=step.get("conf", 0.80), minvalue=0.5, maxvalue=0.99)
             if new_val is not None:
@@ -1500,20 +1552,58 @@ class MacroStudioApp:
             return 100, 100
 
     def refresh_all(self):
+        # refresh_devices() giờ đã TỰ gắn đúng cửa sổ (qua
+        # _attach_window_for_current_device()) - KHÔNG gọi find_ld_windows()
+        # (quét mù) ở đây nữa, kẻo ghi đè mất kết quả đúng vừa gắn được bằng
+        # 1 kết quả quét mù có thể SAI khi đang mở nhiều giả lập.
         self.refresh_devices()
-        self.find_ld_windows()
 
     def refresh_devices(self):
         devs = self.adb.get_devices()
         self.cbo_dev["values"] = devs
+
+        self._device_hwnd_map = {}
+        if self.emulator_manager.has_ldconsole():
+            try:
+                for info in self.emulator_manager.refresh():
+                    if info.adb_serial:
+                        self._device_hwnd_map[info.adb_serial] = info
+            except Exception:
+                pass
+
         if devs:
             self.cbo_dev.current(0)
             self.adb.device_id = devs[0]
             self.adb.update_resolution()
             self.capture_and_show()
+            self._attach_window_for_current_device()
         else:
             self.cbo_dev.set("Chưa có ADB")
         self._update_keycombo_warning()
+
+    def _attach_window_for_current_device(self):
+        """Gắn ĐÚNG cửa sổ LDPlayer (hwnd) tương ứng với giả lập ĐANG CHỌN ở
+        ô 'Thiết bị' - quyết định F7 (ghi macro) và mọi thao tác canh toạ độ
+        khác sẽ chạy trên cửa sổ nào. Ưu tiên hwnd biết CHẮC CHẮN từ
+        `ldconsole list2` (đúng 100% dù mở bao nhiêu giả lập cùng lúc); chỉ
+        khi không có ldconsole.exe trên máy mới lùi về cách quét mù cũ (bắt
+        cửa sổ LDPlayer đầu tiên tìm thấy trên hệ thống - CÓ THỂ SAI nếu
+        đang mở nhiều giả lập)."""
+        serial = self.adb.device_id
+        info = self._device_hwnd_map.get(serial)
+        if info and info.hwnd:
+            if self.window_finder.attach_hwnd(info.hwnd):
+                self.lbl_ld_status.config(text=f"LD: {info.name}", foreground="green")
+                return
+
+        # Không có ánh xạ hwnd tin cậy -> quét mù như trước, kèm cảnh báo nếu
+        # đang mở NHIỀU giả lập cùng lúc (lúc đó quét mù rất dễ bắt NHẦM).
+        self.find_ld_windows()
+        if len(self.adb.get_devices()) > 1:
+            self.lbl_ld_status.config(
+                text=self.lbl_ld_status.cget("text") + " (⚠️ nhiều giả lập, có thể SAI - cần ldconsole.exe để gắn đúng)",
+                foreground="#E65100"
+            )
 
     def _update_keycombo_warning(self):
         """Báo NGAY trên giao diện nếu máy ảo đang chạy Android < 12, vì khi
@@ -1562,6 +1652,7 @@ class MacroStudioApp:
         self.adb._sdk_version = None  # đổi thiết bị -> phải dò lại SDK version
         self.adb.update_resolution()
         self.capture_and_show()
+        self._attach_window_for_current_device()
         self._update_keycombo_warning()
 
     def capture_and_show(self):
@@ -1672,9 +1763,20 @@ class MacroStudioApp:
 
     def toggle_live_record(self):
         if not self.is_recording_live:
-            hwnd, title = self.window_finder.find_ld_windows()
-            if not hwnd:
-                messagebox.showerror("Lỗi", "Chưa nhận diện được cửa sổ LDPlayer!")
+            # QUAN TRỌNG: TRƯỚC ĐÂY gọi find_ld_windows() (quét mù, luôn bắt
+            # cửa sổ LDPlayer ĐẦU TIÊN tìm thấy) ngay tại đây, ghi ĐÈ mất cửa
+            # sổ ĐÚNG đã gắn theo giả lập đang chọn ở ô "Thiết bị" (qua
+            # _attach_window_for_current_device() lúc đổi ô chọn) - khiến F7
+            # LUÔN ghi nhầm vào 1 giả lập cố định (thường là giả lập mở đầu
+            # tiên) mỗi khi mở nhiều giả lập cùng lúc, dù đã đổi đúng ô chọn
+            # và Preview đã đổi đúng - CHÍNH LÀ lỗi người dùng phát hiện ra.
+            # Nay CHỈ dùng cửa sổ đã gắn sẵn theo giả lập đang chọn; chỉ quét
+            # mù lại như phương án CUỐI CÙNG nếu vì lý do gì đó chưa gắn được
+            # cửa sổ nào (vd chưa có ldconsole.exe, hoặc chưa chọn giả lập).
+            if not self.window_finder.main_hwnd:
+                self._attach_window_for_current_device()
+            if not self.window_finder.main_hwnd:
+                messagebox.showerror("Lỗi", "Chưa nhận diện được cửa sổ LDPlayer!\nHãy chọn đúng giả lập ở ô 'Thiết bị' rồi thử lại.")
                 return
             if self.is_streaming_active:
                 self.is_streaming_active = False
@@ -1944,7 +2046,8 @@ class MacroStudioApp:
                 detail = f"{indent_str}├── Tap {s.get('pos')} ({s.get('comment', '')})"
                 tag = "tag_tap"
             elif act == "swipe":
-                detail = f"{indent_str}├── Swipe"
+                hold_ms = s.get("hold_ms", 0)
+                detail = f"{indent_str}├── Swipe" + (f" (🐢 Giữ Cuối {hold_ms}ms)" if hold_ms else "")
                 tag = "tag_swipe"
             elif act == "sleep":
                 detail = f"{indent_str}├── Chờ {s.get('delay')}s"

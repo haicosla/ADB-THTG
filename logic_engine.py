@@ -313,8 +313,17 @@ class LogicEngine:
                         p2 = s.get("to")
                         if p1 and p2:
                             duration = s.get("duration", 250)
-                            self.adb.swipe(p1[0], p1[1], p2[0], p2[1], duration)
-                            self._log("info", f"Swipe [{int(p1[0]*100)}%,{int(p1[1]*100)}%] -> [{int(p2[0]*100)}%,{int(p2[1]*100)}%]")
+                            hold_ms = s.get("hold_ms", 0)
+                            if hold_ms and hold_ms > 0:
+                                # Kéo & Giữ: dùng cho thanh trượt (slider) - xem
+                                # docstring adb_helper.py::swipe_hold() để hiểu
+                                # vì sao cần giữ yên tại đích trước khi nhả tay.
+                                self.adb.swipe_hold(p1[0], p1[1], p2[0], p2[1],
+                                                     move_duration_ms=duration, hold_ms=hold_ms)
+                                self._log("info", f"Kéo & Giữ [{int(p1[0]*100)}%,{int(p1[1]*100)}%] -> [{int(p2[0]*100)}%,{int(p2[1]*100)}%] (giữ {hold_ms}ms)")
+                            else:
+                                self.adb.swipe(p1[0], p1[1], p2[0], p2[1], duration)
+                                self._log("info", f"Swipe [{int(p1[0]*100)}%,{int(p1[1]*100)}%] -> [{int(p2[0]*100)}%,{int(p2[1]*100)}%]")
 
                     elif act == "wait_image":
                         tpl_name = s.get("template", "")

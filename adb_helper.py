@@ -1,6 +1,7 @@
 import os
 import subprocess
 import shutil
+import time
 import cv2
 import numpy as np
 import psutil
@@ -253,6 +254,67 @@ class ADBHelper:
             rx1, ry1 = int(float(x1)), int(float(y1))
             rx2, ry2 = int(float(x2)), int(float(y2))
         self.run_cmd(["shell", "input", "swipe", str(rx1), str(ry1), str(rx2), str(ry2), str(int(duration_ms))])
+
+    def swipe_hold(self, x1, y1, x2, y2, move_duration_ms=300, hold_ms=200, steps=14):
+        """Kéo (drag) MƯỢT qua nhiều điểm trung gian rồi GIỮ YÊN tại điểm đến
+        1 khoảng ngắn TRƯỚC KHI nhả tay - khác với swipe() thường (dùng lệnh
+        "input swipe" atomic của Android, LUÔN nhả tay NGAY LẬP TỨC khi vừa
+        chạm tới điểm đến, đúng lúc còn nguyên vận tốc di chuyển).
+
+        VÌ SAO CẦN HÀM NÀY: nhiều THANH TRƯỢT (slider) trong game coi 1 cú
+        nhả tay còn vận tốc là "vuốt/ném" (fling) chứ không phải "đã kéo
+        xong" (committed drag) -> tự động BẬT NGƯỢC lại vị trí cũ dù đã kéo
+        đúng khoảng cách, trong khi kéo để CUỘN/DI CHUYỂN màn hình bình
+        thường (không có ngưỡng "committed") thì swipe() thường vẫn hoạt
+        động tốt - đúng như hiện tượng người dùng gặp phải.
+
+        BẰNG CHỨNG: file ghi thao tác THẬT (LDPlayer tự ghi khi người dùng
+        kéo thanh trượt bằng tay) cho thấy đúng 3 giai đoạn: (1) chạm xuống,
+        (2) di chuyển mượt qua ~14 điểm liên tiếp trong ~300ms tới đích,
+        (3) ĐỨNG YÊN tại đích thêm ~200ms (không còn sự kiện chạm nào khác,
+        vẫn giữ tay) rồi MỚI nhấc lên. Hàm này mô phỏng lại ĐÚNG 3 giai đoạn
+        đó bằng nhiều lệnh "input touchscreen motionevent DOWN/MOVE/UP" rời
+        rạc (thay vì 1 lệnh "input swipe" atomic không thể chèn khoảng dừng
+        vào giữa) - do CHÍNH kịch bản Python tự canh thời gian (time.sleep)
+        giữa các lệnh; toàn bộ vẫn được Android xử lý như 1 CHUỖI CHẠM LIÊN
+        TỤC (1 lần DOWN, nhiều MOVE, 1 lần UP) trên cùng 1 điểm chạm, không
+        phải nhiều lần chạm rời rạc.
+
+        move_duration_ms: tổng thời gian DI CHUYỂN từ điểm đầu tới điểm cuối.
+        hold_ms: thời gian GIỮ YÊN tại điểm đến trước khi nhả tay - đây là
+            phần THEN CHỐT giúp game nhận thao tác là "đã kéo xong, hợp lệ"
+            thay vì hiểu nhầm là vuốt/ném. Thử 150-300ms nếu 200ms mặc định
+            (đúng bằng số đo thực tế) chưa đủ ăn.
+        steps: số điểm trung gian khi di chuyển - càng nhiều càng mượt
+            (giống ngón tay thật) nhưng tốn nhiều lệnh adb hơn (mỗi điểm là
+            1 tiến trình adb.exe riêng) - 10-20 là đủ mượt, không cần hơn.
+        """
+        if 0.0 <= float(x1) <= 1.0 and 0.0 <= float(y1) <= 1.0:
+            rx1 = int(float(x1) * self.screen_w)
+            ry1 = int(float(y1) * self.screen_h)
+            rx2 = int(float(x2) * self.screen_w)
+            ry2 = int(float(y2) * self.screen_h)
+        else:
+            rx1, ry1 = int(float(x1)), int(float(y1))
+            rx2, ry2 = int(float(x2)), int(float(y2))
+
+        self.run_cmd(["shell", "input", "touchscreen", "motionevent", "DOWN", str(rx1), str(ry1)])
+
+        steps = max(1, int(steps))
+        step_delay = max(0.001, (move_duration_ms / 1000.0) / steps)
+        for i in range(1, steps + 1):
+            alpha = i / steps
+            mx = int(rx1 + (rx2 - rx1) * alpha)
+            my = int(ry1 + (ry2 - ry1) * alpha)
+            time.sleep(step_delay)
+            self.run_cmd(["shell", "input", "touchscreen", "motionevent", "MOVE", str(mx), str(my)])
+
+        # Đứng yên tại đích - giống hệt bản ghi thật: không gửi thêm sự kiện
+        # nào trong lúc giữ, chỉ đơn giản CHỜ rồi mới nhả tay.
+        if hold_ms > 0:
+            time.sleep(hold_ms / 1000.0)
+
+        self.run_cmd(["shell", "input", "touchscreen", "motionevent", "UP", str(rx2), str(ry2)])
 
     def screencap_fast(self):
         cmd = [self.adb_path]
