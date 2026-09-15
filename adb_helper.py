@@ -244,6 +244,26 @@ class ADBHelper:
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, startupinfo=startupinfo)
 
+    def tap_px(self, x_px, y_px):
+        """Giống tap() nhưng LUÔN coi (x_px, y_px) là TOẠ ĐỘ PIXEL TUYỆT ĐỐI,
+        bỏ qua hẳn kiểm tra "0..1 = tỉ lệ" của tap() thường - dùng khi toạ
+        độ đã được TỰ TÍNH TOÁN từ trước (vd: tâm ảnh tìm thấy + độ lệch
+        click_offset người dùng đặt), vì kết quả cộng thêm độ lệch có thể
+        vô tình rơi lại vào khoảng 0..1 (rất hiếm nhưng không phải KHÔNG
+        THỂ) khiến tap() thường hiểu nhầm là toạ độ tỉ lệ rồi nhân sai."""
+        self.run_cmd(["shell", "input", "tap", str(int(round(x_px))), str(int(round(y_px)))])
+
+    def tap_fast_px(self, x_px, y_px):
+        """Bản BẮN NGAY (fire-and-forget) của tap_px() - xem docstring
+        tap_fast() để biết lý do cần bản không chờ riêng cho wait_image."""
+        cmd = [self.adb_path]
+        if self.device_id:
+            cmd.extend(["-s", self.device_id])
+        cmd.extend(["shell", "input", "tap", str(int(round(x_px))), str(int(round(y_px)))])
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, startupinfo=startupinfo)
+
     def swipe(self, x1, y1, x2, y2, duration_ms=250):
         if 0.0 <= float(x1) <= 1.0 and 0.0 <= float(y1) <= 1.0:
             rx1 = int(float(x1) * self.screen_w)

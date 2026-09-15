@@ -352,15 +352,28 @@ class LogicEngine:
                                 if coord:
                                     found = True
                                     if s.get("click", True):
-                                        # tap_fast: bắn lệnh click NGAY, không chờ
-                                        # adb.exe thoát hẳn - giảm độ trễ giữa lúc
-                                        # VỪA thấy ảnh và lúc CLICK thật sự được gửi
-                                        # đi (chỉ áp dụng riêng cho wait_image theo
-                                        # yêu cầu, các bước ảnh khác giữ nguyên tap()).
-                                        self.adb.tap_fast(coord[0], coord[1])
-                                        self._log("success", f"Thấy ảnh '{tpl_name}' (khớp {score:.2f}) -> đã click {coord}")
+                                        # Lệch điểm click (click_offset, đơn vị PIXEL
+                                        # THẬT trên màn hình thiết bị) - cộng thêm vào
+                                        # toạ độ TÂM ảnh vừa tìm thấy trước khi click,
+                                        # dùng khi điểm cần bấm không trùng tâm ảnh mẫu
+                                        # (vd ảnh mẫu là icon nhỏ nhưng nút bấm thật kéo
+                                        # dài sang 1 bên). Mặc định [0,0] = click đúng tâm.
+                                        off_x, off_y = (s.get("click_offset") or [0, 0])
+                                        px = coord[0] * self.adb.screen_w + off_x
+                                        py = coord[1] * self.adb.screen_h + off_y
+                                        # tap_fast_px: bắn lệnh click NGAY, không chờ
+                                        # adb.exe thoát hẳn - giảm độ trễ giữa lúc VỪA
+                                        # thấy ảnh và lúc CLICK thật sự được gửi đi (chỉ
+                                        # áp dụng riêng cho wait_image theo yêu cầu, các
+                                        # bước ảnh khác giữ nguyên tap()); dùng bản "_px"
+                                        # (toạ độ pixel tuyệt đối) vì cộng offset có thể
+                                        # vô tình rơi vào khoảng 0..1 khiến tap_fast()
+                                        # thường hiểu nhầm là toạ độ tỉ lệ.
+                                        self.adb.tap_fast_px(px, py)
+                                        off_txt = f" (lệch {off_x:+d},{off_y:+d}px)" if (off_x or off_y) else ""
+                                        self._log("success", f"Thấy ảnh '{tpl_name}' (khớp {score:.2f}) -> đã click {coord}{off_txt}")
                                     else:
-                                        self._log("success", f"Thấy ảnh '{tpl_name}' (khớp {score:.2f})")
+                                        self._log("success", f"Thấy ảnh '{tpl_name}' (khớp {score:.2f}) - CHỈ làm điều kiện, không click")
                                     break
                                 time.sleep(scan_interval)
                             if not found:
@@ -387,10 +400,14 @@ class LogicEngine:
                             if hit_pos:
                                 found_name = hit_name
                                 if s.get("click", True):
-                                    self.adb.tap(hit_pos[0], hit_pos[1])
-                                    self._log("success", f"Quét đa ảnh: thấy '{hit_name}' (khớp {score:.2f}) -> đã click {hit_pos}")
+                                    off_x, off_y = (s.get("click_offset") or [0, 0])
+                                    px = hit_pos[0] * self.adb.screen_w + off_x
+                                    py = hit_pos[1] * self.adb.screen_h + off_y
+                                    self.adb.tap_px(px, py)
+                                    off_txt = f" (lệch {off_x:+d},{off_y:+d}px)" if (off_x or off_y) else ""
+                                    self._log("success", f"Quét đa ảnh: thấy '{hit_name}' (khớp {score:.2f}) -> đã click {hit_pos}{off_txt}")
                                 else:
-                                    self._log("success", f"Quét đa ảnh: thấy '{hit_name}' (khớp {score:.2f})")
+                                    self._log("success", f"Quét đa ảnh: thấy '{hit_name}' (khớp {score:.2f}) - CHỈ làm điều kiện, không click")
                                 break
                             time.sleep(scan_interval)
                         if not found_name:

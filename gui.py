@@ -1,4 +1,5 @@
 import os
+import glob
 import json
 import time
 import re
@@ -6,7 +7,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 import cv2
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw
 from pynput import keyboard
 
 from adb_helper import ADBHelper
@@ -774,7 +775,11 @@ class MacroStudioApp:
         f_batch.pack(fill="x", padx=10, pady=2)
 
         ttk.Label(f_batch, text="Timeout (s):").pack(side="left", padx=4)
-        self.spin_all_timeout = ttk.Spinbox(f_batch, from_=1, to=120, width=4)
+        # TRƯỚC ĐÂY: to=120 giới hạn timeout hàng loạt tối đa 120s. Nay nới
+        # rất rộng (999999s ~ 11 ngày) để coi như KHÔNG GIỚI HẠN thực tế -
+        # Spinbox bắt buộc có trần trên nên không thể để thật sự vô hạn,
+        # nhưng người dùng vẫn có thể tự gõ tay số lớn hơn nếu muốn.
+        self.spin_all_timeout = ttk.Spinbox(f_batch, from_=1, to=999999, width=6)
         self.spin_all_timeout.set(8)
         self.spin_all_timeout.pack(side="left", padx=2)
 
@@ -993,6 +998,7 @@ class MacroStudioApp:
         ttk.Button(f_bot, text="📁 Nạp JSON", command=self.load_macro_file).pack(side="left", padx=4)
         ttk.Button(f_bot, text="💾 Lưu JSON", command=self.save_macro_file).pack(side="left", padx=4)
         ttk.Button(f_bot, text="📋 Đăng Ký Tác Vụ", command=self.register_current_task).pack(side="left", padx=4)
+        ttk.Button(f_bot, text="🖼️ Thư Viện Ảnh", command=self.open_template_library).pack(side="left", padx=4)
 
         self.btn_run = ttk.Button(f_bot, text="▶ CHẠY THỬ (ADB)", command=self.run_macro)
         self.btn_run.pack(side="right", padx=4)
@@ -1068,6 +1074,19 @@ class MacroStudioApp:
             if step.get("region"):
                 menu.add_command(label="🗑 Bỏ Vùng Quét (quét lại toàn màn hình)",
                                  command=lambda: self._clear_step_region(idx))
+            # if_image KHÔNG BAO GIỜ click (chỉ dùng làm điều kiện IF) nên
+            # không cần tuỳ chọn Click/Lệch Điểm Click - chỉ áp dụng cho
+            # wait_image (Tìm & Click 1 ảnh) và multi_image (Quét đa ảnh).
+            if act in ("wait_image", "multi_image"):
+                does_click = step.get("click", True)
+                click_lbl = "✅ Có Click Khi Thấy Ảnh" if does_click else "🚫 KHÔNG Click (chỉ làm điều kiện)"
+                menu.add_command(label=f"🖱️ Bật/Tắt Click Khi Thấy Ảnh ({click_lbl})",
+                                 command=lambda: self._edit_step_field(idx, "click_toggle"))
+                if does_click:
+                    off = step.get("click_offset") or [0, 0]
+                    off_txt = f"lệch {off[0]:+d}, {off[1]:+d} px" if (off[0] or off[1]) else "click đúng tâm ảnh"
+                    menu.add_command(label=f"🎯 Đặt Lệch Điểm Click ({off_txt})",
+                                     command=lambda: self._edit_step_field(idx, "click_offset"))
             # BUG CŨ: điều kiện chỉ kiểm tra "template" (số ít), nhưng if_image
             # (nhóm ảnh) và multi_image (quét đa ảnh) lưu ảnh ở "templates"
             # (số nhiều, list) -> menu đổi ảnh không bao giờ hiện ra cho 2 loại
@@ -1076,9 +1095,14 @@ class MacroStudioApp:
                 tpl_display = step.get("template") or "⚠️ chưa chọn"
                 menu.add_command(label=f"🖼️ Chọn/Quét Lại Ảnh Bằng Preview... ({tpl_display})",
                                  command=lambda: self._arm_image_recapture(idx))
-                if step.get("template"):
-                    menu.add_command(label="🖼️ Đổi Bằng File Ảnh Có Sẵn Trong Thư Mục templates...",
-                                     command=self.change_step_image)
+                # TRƯỚC ĐÂY: chỉ hiện khi đã có sẵn "template" (dùng để ĐỔI
+                # ảnh) -> bước RỖNG (tạo qua ESC, template=None) không có
+                # cách nào lấy ảnh từ file có sẵn, buộc phải quét Preview.
+                # Nay luôn hiện, đổi nhãn tuỳ trường hợp rỗng hay đã có ảnh.
+                lbl_pick_file = ("🖼️ Đổi Bằng File Ảnh Có Sẵn Trong Thư Mục templates..."
+                                  if step.get("template") else
+                                  "🖼️ Lấy Từ File Ảnh Có Sẵn Trong Thư Mục templates...")
+                menu.add_command(label=lbl_pick_file, command=self.change_step_image)
             elif "templates" in step:
                 menu.add_command(label=f"🖼️ Quản lý {len(step.get('templates', []))} ảnh trong nhóm...",
                                  command=lambda: self.manage_group_templates(idx))
@@ -1212,9 +1236,48 @@ class MacroStudioApp:
             if new_val is not None:
                 step["conf"] = round(new_val, 2)
         elif field_type == "timeout":
-            new_val = simpledialog.askinteger("Sửa Timeout", "Thời gian chờ tối đa (giây):", initialvalue=step.get("timeout", 8), minvalue=1, maxvalue=120)
+            # TRƯỚC ĐÂY: maxvalue=120 giới hạn tối đa 120 giây, khiến không
+            # thể đặt bước quét/lặp chờ lâu hơn 2 phút dù người dùng muốn
+            # chờ vô thời hạn (đến khi thấy ảnh hoặc bị bấm Dừng thủ công).
+            # Nay bỏ trần trên - chỉ còn giữ minvalue=1 (0/âm không có nghĩa
+            # với 1 vòng lặp time.time()-start<timeout, xem check_condition()
+            # trong logic_engine.py).
+            new_val = simpledialog.askinteger(
+                "Sửa Timeout",
+                "Thời gian chờ tối đa (giây) - để rất lớn nếu muốn gần như\n"
+                "KHÔNG GIỚI HẠN (vd 86400 = chờ tối đa 24 giờ, dừng sớm hơn\n"
+                "ngay khi thấy ảnh hoặc khi bấm nút DỪNG):",
+                initialvalue=step.get("timeout", 8), minvalue=1
+            )
             if new_val is not None:
                 step["timeout"] = new_val
+        elif field_type == "click_toggle":
+            # Đảo trạng thái click: True <-> False. Khi False, logic_engine
+            # SẼ KHÔNG bắn lệnh tap dù thấy ảnh - dùng để bước ảnh này chỉ
+            # đóng vai trò XÁC NHẬN (điều kiện) cho các bước phía sau, không
+            # tự thao tác gì lên máy ảo (vd: dùng chung với IF Biến/Set Var
+            # ngay sau đó để rẽ nhánh tuỳ theo có thấy ảnh hay không, mà
+            # không cần lo bước này lỡ tay bấm nhầm vào đâu đó).
+            step["click"] = not step.get("click", True)
+        elif field_type == "click_offset":
+            cur = step.get("click_offset") or [0, 0]
+            raw = simpledialog.askstring(
+                "Đặt Lệch Điểm Click",
+                "Lệch điểm click so với TÂM ảnh vừa tìm thấy, đơn vị PIXEL thật\n"
+                "trên màn hình thiết bị. Định dạng: dx,dy\n"
+                "VD: 50,-30  (lệch PHẢI 50px, lên TRÊN 30px)\n"
+                "VD: 0,0     (click đúng tâm ảnh - mặc định)\n"
+                "Số dương X = sang phải, số dương Y = xuống dưới.",
+                initialvalue=f"{cur[0]},{cur[1]}"
+            )
+            if raw is not None:
+                try:
+                    parts = [p.strip() for p in raw.split(",")]
+                    dx, dy = int(float(parts[0])), int(float(parts[1]))
+                    step["click_offset"] = [dx, dy]
+                except (ValueError, IndexError):
+                    messagebox.showerror("Lỗi", "Định dạng không hợp lệ! Nhập theo dạng: dx,dy (vd: 50,-30)")
+                    return
         elif field_type == "scan_interval":
             new_val = simpledialog.askfloat(
                 "Sửa Tốc Độ Quét",
@@ -1815,6 +1878,9 @@ class MacroStudioApp:
             path = os.path.join("templates", target_file)
             if os.path.exists(path):
                 self.active_inspect_path = path
+                # Ghi nhớ bước đang chọn để _render_inspect_thumbnail() vẽ
+                # thêm điểm LỆCH CLICK (click_offset) đè lên thumbnail nếu có.
+                self.active_inspect_step = step
                 self.btn_change_img.config(state="normal")
                 self._render_inspect_thumbnail()
                 return
@@ -1853,12 +1919,43 @@ class MacroStudioApp:
         if not path or not os.path.exists(path):
             return
         try:
-            img = Image.open(path)
+            img = Image.open(path).convert("RGB")
             w, h = img.size
+
+            # Nếu bước đang chọn có đặt LỆCH ĐIỂM CLICK (click_offset) và
+            # vẫn đang BẬT click, vẽ đè 1 dấu (+) đỏ lên đúng vị trí sẽ được
+            # bấm thật (tính từ TÂM ảnh mẫu, cộng thêm độ lệch theo pixel
+            # thật) - cho thấy ngay trên thumbnail thay vì phải tự hình dung.
+            step = getattr(self, "active_inspect_step", None)
+            offset = None
+            if step and step.get("action") in ("wait_image", "multi_image") and step.get("click", True):
+                off = step.get("click_offset") or [0, 0]
+                if off[0] or off[1]:
+                    offset = off
+
+            if offset:
+                img = img.copy()
+                draw = ImageDraw.Draw(img)
+                cx, cy = w / 2, h / 2
+                # Kẹp điểm đánh dấu trong khung ảnh (min 4px lề) để vẫn NHÌN
+                # THẤY được dấu ngay cả khi lệch ra ngoài phạm vi ảnh mẫu -
+                # vị trí click THẬT lúc chạy vẫn đúng bằng số pixel đã đặt,
+                # chỉ có hình vẽ minh hoạ này bị kẹp lại cho dễ nhìn.
+                mx = max(4, min(w - 4, cx + offset[0]))
+                my = max(4, min(h - 4, cy + offset[1]))
+                r = max(5, min(w, h) // 10)
+                draw.line([(cx, cy), (mx, my)], fill=(0, 230, 230), width=2)
+                draw.ellipse([mx - r, my - r, mx + r, my + r], outline=(255, 40, 40), width=3)
+                draw.line([(mx - r, my), (mx + r, my)], fill=(255, 40, 40), width=2)
+                draw.line([(mx, my - r), (mx, my + r)], fill=(255, 40, 40), width=2)
+
             img.thumbnail((max(70, self.lbl_inspect_img.winfo_width() - 10), max(70, self.lbl_inspect_img.winfo_height() - 10)))
             self.current_inspect_photo = ImageTk.PhotoImage(img)
             self.lbl_inspect_img.config(image=self.current_inspect_photo, text="")
-            self.lbl_inspect_info.config(text=f"{os.path.basename(path)}\n{w}x{h}px")
+            info_txt = f"{os.path.basename(path)}\n{w}x{h}px"
+            if offset:
+                info_txt += f"\n🎯 Lệch click: {offset[0]:+d},{offset[1]:+d}px (chấm đỏ = điểm bấm thật)"
+            self.lbl_inspect_info.config(text=info_txt)
         except Exception:
             pass
 
@@ -1870,6 +1967,7 @@ class MacroStudioApp:
         self.lbl_inspect_info.config(text="")
         self.btn_change_img.config(state="disabled")
         self.active_inspect_path = None
+        self.active_inspect_step = None
 
     def open_large_inspect_image(self, event=None):
         if getattr(self, "active_inspect_path", None) and os.path.exists(self.active_inspect_path):
@@ -1881,6 +1979,209 @@ class MacroStudioApp:
             lbl = tk.Label(top, image=photo)
             lbl.image = photo
             lbl.pack(padx=10, pady=10)
+
+    def _compute_template_usage(self):
+        """Quét TẤT CẢ tác vụ đã lưu trong thư mục tasks/*.json, CỘNG với
+        kịch bản đang mở trong bộ nhớ (self.steps - có thể đang sửa dở,
+        chưa lưu ra đĩa), để biết mỗi ảnh trong templates/ đang được dùng
+        ở những tác vụ nào. Trả về dict:
+            {tên_file_ảnh: {"count": số lần dùng, "used_in": [tên các tác vụ]}}
+        Ảnh KHÔNG có mặt trong dict này = ảnh chưa dùng trong task nào.
+        Cố tình gộp cả kịch bản đang mở (chưa lưu) để tránh xoá nhầm ảnh
+        đang dùng dở chỉ vì chưa kịp bấm Lưu JSON."""
+        usage = {}
+
+        def _register(fname, task_label):
+            if not fname:
+                return
+            entry = usage.setdefault(fname, {"count": 0, "used_in": []})
+            entry["count"] += 1
+            if task_label not in entry["used_in"]:
+                entry["used_in"].append(task_label)
+
+        def _scan_steps(steps, task_label):
+            for s in steps:
+                if not isinstance(s, dict):
+                    continue
+                if s.get("template"):
+                    _register(s["template"], task_label)
+                for t in (s.get("templates") or []):
+                    _register(t, task_label)
+
+        for path in glob.glob(os.path.join("tasks", "*.json")):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    _scan_steps(data, os.path.splitext(os.path.basename(path))[0])
+            except Exception:
+                continue
+
+        current_label = (
+            os.path.splitext(os.path.basename(self.current_macro_path))[0] + " (đang mở)"
+            if self.current_macro_path else "(kịch bản đang mở, chưa lưu)"
+        )
+        _scan_steps(self.steps, current_label)
+
+        return usage
+
+    def open_template_library(self):
+        """Thư viện ảnh (thư mục templates/): xem toàn bộ ảnh kèm số lần &
+        tác vụ đang dùng, lọc riêng ảnh KHÔNG dùng trong task nào, và xoá
+        (đã chọn hoặc toàn bộ ảnh chưa dùng) ngay tại đây thay vì phải mở
+        Explorer dò từng file."""
+        os.makedirs("templates", exist_ok=True)
+
+        top = tk.Toplevel(self.root)
+        top.title("🖼️ Thư Viện Ảnh (Templates)")
+        top.geometry("640x580")
+        top.transient(self.root)
+        top.grab_set()
+        _bind_esc_close(top)
+        top._thumb_refs = []
+
+        var_only_unused = tk.BooleanVar(value=False)
+        checks = {}  # tên_file -> tk.BooleanVar (trạng thái được chọn)
+
+        f_top = ttk.Frame(top)
+        f_top.pack(fill="x", padx=10, pady=(10, 4))
+        lbl_summary = ttk.Label(f_top, text="")
+        lbl_summary.pack(side="left")
+        chk_unused = ttk.Checkbutton(
+            f_top, text="Chỉ hiện ảnh CHƯA dùng trong task nào", variable=var_only_unused,
+            command=lambda: render_grid()
+        )
+        chk_unused.pack(side="right")
+
+        f_scroll = ttk.Frame(top)
+        f_scroll.pack(fill="both", expand=True, padx=10, pady=4)
+        canvas = tk.Canvas(f_scroll, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(f_scroll, orient="vertical", command=canvas.yview)
+        f_list = ttk.Frame(canvas)
+        f_list.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=f_list, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        def _load_thumb(fname, size=56):
+            path = os.path.join("templates", fname)
+            try:
+                img = Image.open(path)
+                img.thumbnail((size, size))
+                photo = ImageTk.PhotoImage(img)
+                top._thumb_refs.append(photo)
+                return photo
+            except Exception:
+                return None
+
+        def _list_all_files():
+            return sorted(
+                f for f in os.listdir("templates")
+                if f.lower().endswith((".png", ".jpg", ".jpeg"))
+            )
+
+        def render_grid():
+            usage = self._compute_template_usage()
+            all_files = _list_all_files()
+            unused = [f for f in all_files if f not in usage]
+            lbl_summary.config(
+                text=f"Tổng {len(all_files)} ảnh  —  {len(unused)} ảnh CHƯA dùng trong task nào"
+            )
+
+            top._thumb_refs.clear()
+            for w in f_list.winfo_children():
+                w.destroy()
+
+            shown = unused if var_only_unused.get() else all_files
+            # Giữ nguyên lựa chọn cũ cho ảnh vẫn còn hiển thị, dọn phần đã ẩn
+            for fname in list(checks.keys()):
+                if fname not in shown:
+                    checks.pop(fname, None)
+
+            if not shown:
+                msg = "(Không còn ảnh nào chưa dùng 🎉)" if var_only_unused.get() else "(Thư mục templates trống)"
+                ttk.Label(f_list, text=msg, foreground="gray").pack(pady=12)
+
+            for fname in shown:
+                row = ttk.Frame(f_list)
+                row.pack(fill="x", pady=2, padx=2)
+                var = checks.setdefault(fname, tk.BooleanVar(value=False))
+                ttk.Checkbutton(row, variable=var).pack(side="left")
+                thumb = _load_thumb(fname)
+                if thumb:
+                    tk.Label(row, image=thumb, bg="#212121").pack(side="left", padx=4)
+                else:
+                    tk.Label(row, text="(?)", width=8, bg="#212121", fg="gray").pack(side="left", padx=4)
+                ttk.Label(row, text=fname, width=26).pack(side="left", padx=4)
+                info = usage.get(fname)
+                if info:
+                    used_txt = ", ".join(info["used_in"][:3]) + ("..." if len(info["used_in"]) > 3 else "")
+                    status_txt = f"Dùng {info['count']} lần — {used_txt}"
+                    fg = "#2e7d32"
+                else:
+                    status_txt = "⚠️ CHƯA dùng trong task nào"
+                    fg = "#c0392b"
+                ttk.Label(row, text=status_txt, foreground=fg).pack(side="left", padx=4)
+
+        def select_all(state):
+            for var in checks.values():
+                var.set(state)
+
+        def _delete_files(names):
+            errors = []
+            for fname in names:
+                try:
+                    os.remove(os.path.join("templates", fname))
+                except Exception as e:
+                    errors.append(f"{fname}: {e}")
+                checks.pop(fname, None)
+            if errors:
+                messagebox.showerror(
+                    "Lỗi", "Một số ảnh không xoá được:\n" + "\n".join(errors), parent=top
+                )
+
+        def delete_selected():
+            names = [f for f, v in checks.items() if v.get()]
+            if not names:
+                messagebox.showinfo("Lưu ý", "Chưa chọn ảnh nào để xoá.", parent=top)
+                return
+            if not messagebox.askyesno(
+                "Xác nhận",
+                f"Xoá {len(names)} ảnh đã chọn khỏi thư mục templates/?\n"
+                "Hành động này KHÔNG thể hoàn tác!",
+                parent=top,
+            ):
+                return
+            _delete_files(names)
+            render_grid()
+
+        def delete_all_unused():
+            usage = self._compute_template_usage()
+            unused = [f for f in _list_all_files() if f not in usage]
+            if not unused:
+                messagebox.showinfo("Lưu ý", "Không có ảnh nào chưa dùng.", parent=top)
+                return
+            if not messagebox.askyesno(
+                "Xác nhận",
+                f"Xoá TẤT CẢ {len(unused)} ảnh KHÔNG dùng trong task nào?\n"
+                "Hành động này KHÔNG thể hoàn tác!",
+                parent=top,
+            ):
+                return
+            _delete_files(unused)
+            render_grid()
+
+        f_btn = ttk.Frame(top)
+        f_btn.pack(fill="x", padx=10, pady=8)
+        ttk.Button(f_btn, text="☑ Chọn Tất Cả (đang hiện)", command=lambda: select_all(True)).pack(side="left", padx=2)
+        ttk.Button(f_btn, text="☐ Bỏ Chọn Tất Cả", command=lambda: select_all(False)).pack(side="left", padx=2)
+        ttk.Button(f_btn, text="🗑 Xoá Đã Chọn", command=delete_selected).pack(side="left", padx=8)
+        ttk.Button(f_btn, text="🗑 Xoá TẤT CẢ Ảnh Chưa Dùng", command=delete_all_unused).pack(side="left", padx=2)
+        ttk.Button(f_btn, text="✔ Đóng", command=top.destroy).pack(side="right", padx=4)
+
+        render_grid()
+        top.wait_window()
 
     def change_step_image(self):
         sel = self.tree.selection()
