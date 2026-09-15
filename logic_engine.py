@@ -220,7 +220,7 @@ class LogicEngine:
                     if s.get("templates"):
                         cond_desc = f"IF thấy 1 trong {len(s.get('templates'))} ảnh"
                     else:
-                        cond_desc = f"IF thấy ảnh '{s.get('template')}'"
+                        cond_desc = f"IF thấy ảnh '{s.get('template')}'" if s.get("template") else "IF ảnh (⚠️ CHƯA CHỌN ẢNH)"
                 else:
                     var_name = s.get("var", "")
                     op = s.get("op", "==")
@@ -309,6 +309,8 @@ class LogicEngine:
                         if pos:
                             self.adb.tap(pos[0], pos[1])
                             self._log("info", f"Tap [{int(pos[0]*100)}%, {int(pos[1]*100)}%]")
+                        else:
+                            self._log("error", "Bước Tap chưa chọn tọa độ - hãy bấm đúp/chuột phải vào bước này để chọn")
 
                     elif act == "swipe":
                         p1 = s.get("from")
@@ -326,11 +328,18 @@ class LogicEngine:
                             else:
                                 self.adb.swipe(p1[0], p1[1], p2[0], p2[1], duration)
                                 self._log("info", f"Swipe [{int(p1[0]*100)}%,{int(p1[1]*100)}%] -> [{int(p2[0]*100)}%,{int(p2[1]*100)}%]")
+                        else:
+                            self._log("error", "Bước Swipe chưa chọn điểm đầu/cuối - hãy bấm đúp/chuột phải vào bước này để chọn")
 
                     elif act == "wait_image":
-                        tpl_name = s.get("template", "")
+                        # s.get("template", "") CHỈ trả về "" khi key "template"
+                        # KHÔNG TỒN TẠI - với bước RỖNG (tạo qua ESC) key này
+                        # LUÔN TỒN TẠI nhưng giá trị là None, nên phải "or \"\"" 
+                        # thêm 1 lớp nữa, nếu không os.path.join() sẽ crash vì
+                        # nhận None thay vì str.
+                        tpl_name = s.get("template") or ""
                         tpl_path = os.path.join("templates", tpl_name)
-                        if os.path.exists(tpl_path):
+                        if tpl_name and os.path.exists(tpl_path):
                             tpl = cv2.imdecode(np.fromfile(tpl_path, dtype=np.uint8), cv2.IMREAD_COLOR)
                             start = time.time()
                             timeout = s.get("timeout", 8)
@@ -357,7 +366,8 @@ class LogicEngine:
                             if not found:
                                 self._log("warn", f"KHÔNG thấy ảnh '{tpl_name}' sau {timeout}s")
                         else:
-                            self._log("error", f"Không tìm thấy file ảnh mẫu '{tpl_name}' trong thư mục templates")
+                            self._log("error", f"Không tìm thấy file ảnh mẫu '{tpl_name}' trong thư mục templates" if tpl_name
+                                       else "Bước Tìm & Click Ảnh chưa chọn ảnh - hãy bấm đúp/chuột phải vào bước này để chọn")
 
                     elif act == "multi_image":
                         tpl_dict = {}

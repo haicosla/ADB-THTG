@@ -613,6 +613,21 @@ class MacroStudioApp:
         self.pending_action = None
         self._ocr_edit_idx = None
         self._region_edit_idx = None
+        # Dùng khi bấm ESC hủy quét NGAY LÚC THÊM bước mới (thay vì quét
+        # khung ảnh/tọa độ ngay) -> vẫn chèn 1 bước RỖNG (chưa chọn ảnh/tọa
+        # độ), rồi có thể bấm đúp/menu chuột phải vào bước đó để CHỌN SAU.
+        # Khác với _ocr_edit_idx/_region_edit_idx (đang SỬA 1 bước ĐÃ CÓ sẵn)
+        # ở chỗ: 3 biến dưới đây cũng dùng để SỬA bước đã có (đổi ảnh/tọa độ
+        # bằng cách quét lại trên Preview), nhưng khi None nghĩa là đang TẠO
+        # MỚI - bấm ESC lúc đó sẽ tạo bước rỗng thay vì không làm gì cả.
+        self._image_edit_idx = None
+        self._tap_edit_idx = None
+        self._swipe_edit_idx = None
+        # Vùng quét (region của wait_image/if_image/multi_image, hoặc box
+        # của ocr_text) của BƯỚC ĐANG ĐƯỢC CHỌN trong danh sách - hiển thị
+        # đè lên Preview (xem render_preview) để dễ hình dung bước đó quét ở
+        # đâu trên màn hình mà không cần mở lại chế độ chọn vùng.
+        self._step_region_overlay = None
 
         self.is_playing = False
         self.stop_flag = False
@@ -804,6 +819,11 @@ class MacroStudioApp:
         self.canvas.bind("<ButtonPress-1>", self.on_canvas_press)
         self.canvas.bind("<B1-Motion>", self.on_canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_canvas_release)
+        # ESC hủy quét khung ảnh/tọa độ đang chờ (pending_action). Bind vào
+        # bind_all để bắt được dù focus đang ở đâu trong cửa sổ chính (KHÔNG
+        # ảnh hưởng ESC đóng các cửa sổ Toplevel riêng - _bind_esc_close() ở
+        # đó bind trực tiếp lên từng Toplevel nên luôn được ưu tiên trước).
+        self.root.bind_all("<Escape>", self._on_escape_key)
 
         f_right_container = ttk.Frame(self.paned)
         self.paned.add(f_right_container, weight=5)
@@ -916,6 +936,7 @@ class MacroStudioApp:
         self.tree.tag_configure("tag_sleep", background="#ECEFF1", foreground="#37474F")
         self.tree.tag_configure("tag_key", background="#FFF3E0", foreground="#E65100")
         self.tree.tag_configure("tag_var", background="#FFFDE7", foreground="#F57F17")
+        self.tree.tag_configure("tag_warn", background="#FFEBEE", foreground="#B71C1C")
 
         f_legend = ttk.Frame(f_right_container)
         f_legend.pack(fill="x", padx=5, pady=2)
@@ -1052,11 +1073,24 @@ class MacroStudioApp:
             # (số nhiều, list) -> menu đổi ảnh không bao giờ hiện ra cho 2 loại
             # bước này. Nay xử lý cả 2 trường hợp.
             if "template" in step:
-                menu.add_command(label=f"🖼️ Đổi file ảnh ({step.get('template')})", 
-                                 command=self.change_step_image)
+                tpl_display = step.get("template") or "⚠️ chưa chọn"
+                menu.add_command(label=f"🖼️ Chọn/Quét Lại Ảnh Bằng Preview... ({tpl_display})",
+                                 command=lambda: self._arm_image_recapture(idx))
+                if step.get("template"):
+                    menu.add_command(label="🖼️ Đổi Bằng File Ảnh Có Sẵn Trong Thư Mục templates...",
+                                     command=self.change_step_image)
             elif "templates" in step:
                 menu.add_command(label=f"🖼️ Quản lý {len(step.get('templates', []))} ảnh trong nhóm...",
                                  command=lambda: self.manage_group_templates(idx))
+
+        elif act == "tap":
+            # THIẾU TRƯỚC ĐÂY: bước tap (kể cả bước RỖNG tạo qua ESC) không
+            # có menu nào để chọn/chọn lại tọa độ - phải xóa đi làm lại.
+            menu.add_separator()
+            pos = step.get("pos")
+            pos_display = f"{int(pos[0]*100)}%, {int(pos[1]*100)}%" if pos else "⚠️ chưa chọn"
+            menu.add_command(label=f"🎯 Chọn/Chọn Lại Tọa Độ Bằng Preview... ({pos_display})",
+                             command=lambda: self._arm_tap_recapture(idx))
 
         elif act == "key_combo":
             # THIẾU TRƯỚC ĐÂY: không có nhánh nào xử lý key_combo trong menu
@@ -1105,6 +1139,10 @@ class MacroStudioApp:
             # THANH TRƯỢT (slider) không bị game hiểu nhầm thành vuốt/ném rồi
             # bật ngược lại (xem docstring adb_helper.py::swipe_hold()).
             menu.add_separator()
+            has_pts = step.get("from") and step.get("to")
+            pts_display = "đã chọn" if has_pts else "⚠️ chưa chọn"
+            menu.add_command(label=f"🎯 Chọn/Chọn Lại Điểm Đầu-Cuối Bằng Preview... ({pts_display})",
+                             command=lambda: self._arm_swipe_recapture(idx))
             menu.add_command(label=f"⏳ Sửa Thời Gian Kéo - Duration ({step.get('duration', 250)}ms)",
                              command=lambda: self._edit_step_field(idx, "swipe_duration"))
             hold_ms = step.get("hold_ms", 0)
@@ -1389,13 +1427,20 @@ class MacroStudioApp:
         self.tree.selection_set(str(idx))
 
     _CAPTURE_HINTS = {
-        "wait_image": "🖱️ Kéo khung trên Preview để chọn ẢNH cần Tìm & Click...",
-        "if_image": "🖱️ Kéo khung trên Preview để chọn ẢNH điều kiện IF...",
-        "tap": "🖱️ Bấm 1 điểm trên Preview để chọn tọa độ Tap...",
-        "swipe": "🖱️ Kéo từ điểm đầu đến điểm cuối trên Preview để tạo Vuốt...",
-        "ocr_text": "🖱️ Kéo khung trên Preview để chọn VÙNG cần quét chữ (OCR)...",
-        "image_region": "🖱️ Kéo khung trên Preview để GIỚI HẠN vùng quét ảnh cho bước này...",
+        "wait_image": "🖱️ Kéo khung trên Preview để chọn ẢNH cần Tìm & Click... (ESC = để trống, chọn ảnh sau)",
+        "if_image": "🖱️ Kéo khung trên Preview để chọn ẢNH điều kiện IF... (ESC = để trống, chọn ảnh sau)",
+        "tap": "🖱️ Bấm 1 điểm trên Preview để chọn tọa độ Tap... (ESC = để trống, chọn tọa độ sau)",
+        "swipe": "🖱️ Kéo từ điểm đầu đến điểm cuối trên Preview để tạo Vuốt... (ESC = để trống, chọn tọa độ sau)",
+        "ocr_text": "🖱️ Kéo khung trên Preview để chọn VÙNG cần quét chữ (OCR)... (ESC = hủy)",
+        "image_region": "🖱️ Kéo khung trên Preview để GIỚI HẠN vùng quét ảnh cho bước này... (ESC = hủy)",
     }
+
+    # Các loại hành động CHO PHÉP tạo bước RỖNG (chưa chọn ảnh/tọa độ) khi
+    # bấm ESC thay vì quét ngay - "ocr_text"/"image_region" KHÔNG có trong
+    # danh sách này vì bản thân chúng luôn gắn liền với 1 bước cụ thể (sửa
+    # vùng của bước đã có, hoặc phải hỏi tên biến ngay lúc tạo) nên ESC ở 2
+    # loại đó chỉ đơn giản là HỦY, không tạo gì cả.
+    _PLACEHOLDER_KINDS = ("wait_image", "if_image", "tap", "swipe")
 
     def _arm_capture(self, kind):
         if self.current_screen_cv is None:
@@ -1405,9 +1450,69 @@ class MacroStudioApp:
         self.lbl_capture_hint.config(text=self._CAPTURE_HINTS.get(kind, ""))
         self.btn_cancel_capture.pack(side="left", padx=2)
 
+    def _is_editing_existing_step(self):
+        """True nếu pending_action hiện tại là đang SỬA LẠI (chọn lại ảnh/
+        tọa độ/vùng quét) cho 1 bước ĐÃ CÓ SẴN trong danh sách, thay vì đang
+        tạo mới - dùng để quyết định bấm ESC có nên chèn bước RỖNG hay không
+        (chỉ chèn khi đang TẠO MỚI, sửa bước cũ thì ESC chỉ đơn giản là hủy
+        sửa, giữ nguyên bước cũ)."""
+        k = self.pending_action
+        return (
+            (k in ("wait_image", "if_image") and self._image_edit_idx is not None) or
+            (k == "tap" and self._tap_edit_idx is not None) or
+            (k == "swipe" and self._swipe_edit_idx is not None) or
+            (k == "ocr_text" and self._ocr_edit_idx is not None) or
+            (k == "image_region" and self._region_edit_idx is not None)
+        )
+
+    def _on_escape_key(self, event=None):
+        """ESC khi đang chờ quét (pending_action): hủy bỏ. Nếu đang TẠO MỚI
+        1 bước Tìm&Click Ảnh/IF Ảnh/Tap/Swipe (không phải sửa lại bước cũ),
+        thêm luôn 1 bước RỖNG (chưa chọn ảnh/tọa độ) thay vì không làm gì -
+        cho phép soạn xong bố cục kịch bản trước, quay lại CHỌN ẢNH/TỌA ĐỘ
+        SAU (bấm đúp hoặc menu chuột phải vào bước đó)."""
+        if not self.pending_action:
+            return
+        kind = self.pending_action
+        make_placeholder = kind in self._PLACEHOLDER_KINDS and not self._is_editing_existing_step()
+        self._cancel_pending_action()
+        if make_placeholder:
+            self._insert_placeholder_step(kind)
+
+    def _insert_placeholder_step(self, kind):
+        """Chèn 1 bước RỖNG (chưa chọn ảnh/tọa độ) cho hành động `kind` -
+        xem _on_escape_key(). Bấm đúp hoặc chuột phải -> chọn lại vào bước
+        này trong danh sách để chọn ảnh/tọa độ thật khi cần."""
+        if kind in ("wait_image", "if_image"):
+            step = {
+                "action": kind, "template": None,
+                "timeout": 8 if kind == "wait_image" else 3, "conf": 0.80,
+                "repeat": 1, "delay": 1.0 if kind == "wait_image" else 0.2,
+                "comment": "⚠️ Chưa chọn ảnh - bấm đúp/chuột phải để chọn",
+            }
+            if kind == "wait_image":
+                step["click"] = True
+        elif kind == "tap":
+            step = {
+                "action": "tap", "pos": None, "repeat": 1, "delay": 1.0,
+                "comment": "⚠️ Chưa chọn tọa độ - bấm đúp/chuột phải để chọn",
+            }
+        elif kind == "swipe":
+            step = {
+                "action": "swipe", "from": None, "to": None, "duration": 250,
+                "repeat": 1, "delay": 1.0,
+                "comment": "⚠️ Chưa chọn tọa độ - bấm đúp/chuột phải để chọn",
+            }
+        else:
+            return
+        self._insert_step(step)
+
     def _cancel_pending_action(self):
         self._ocr_edit_idx = None
         self._region_edit_idx = None
+        self._image_edit_idx = None
+        self._tap_edit_idx = None
+        self._swipe_edit_idx = None
         self.pending_action = None
         self.lbl_capture_hint.config(text="")
         self.btn_cancel_capture.pack_forget()
@@ -1422,6 +1527,29 @@ class MacroStudioApp:
         self._arm_capture("tap")
 
     def add_manual_swipe(self):
+        self._arm_capture("swipe")
+
+    def _arm_image_recapture(self, idx):
+        """Chọn (hoặc chọn LẠI) ảnh cho 1 bước wait_image/if_image ĐÃ CÓ
+        SẴN bằng cách quét khung trên Preview - dùng cho cả bước rỗng (tạo
+        qua ESC) lẫn bước đã có ảnh muốn đổi ảnh khác."""
+        if not (0 <= idx < len(self.steps)):
+            return
+        self._image_edit_idx = idx
+        self._arm_capture(self.steps[idx].get("action", "wait_image"))
+
+    def _arm_tap_recapture(self, idx):
+        """Chọn (hoặc chọn LẠI) tọa độ cho 1 bước tap ĐÃ CÓ SẴN."""
+        if not (0 <= idx < len(self.steps)):
+            return
+        self._tap_edit_idx = idx
+        self._arm_capture("tap")
+
+    def _arm_swipe_recapture(self, idx):
+        """Chọn (hoặc chọn LẠI) điểm đầu/cuối cho 1 bước swipe ĐÃ CÓ SẴN."""
+        if not (0 <= idx < len(self.steps)):
+            return
+        self._swipe_edit_idx = idx
         self._arm_capture("swipe")
 
     def add_manual_type_text(self):
@@ -1468,6 +1596,7 @@ class MacroStudioApp:
             self.steps[idx].pop("region", None)
             self.refresh_tree()
             self.tree.selection_set(str(idx))
+            self.on_step_selected()
 
     def add_manual_popup(self):
         msg = simpledialog.askstring(
@@ -1676,9 +1805,11 @@ class MacroStudioApp:
         sel = self.tree.selection()
         if not sel:
             self._clear_inspector()
+            self._update_region_overlay(None)
             return
         idx = int(sel[0])
         step = self.steps[idx]
+        self._update_region_overlay(step)
         target_file = step.get("template") if step.get("action") in ("wait_image", "if_image") else (step.get("templates")[0] if step.get("templates") else None)
         if target_file:
             path = os.path.join("templates", target_file)
@@ -1688,6 +1819,26 @@ class MacroStudioApp:
                 self._render_inspect_thumbnail()
                 return
         self._clear_inspector()
+
+    def _update_region_overlay(self, step):
+        """Cập nhật vùng quét (region của wait_image/if_image/multi_image,
+        hoặc box của ocr_text) cần vẽ đè lên Preview theo BƯỚC ĐANG ĐƯỢC
+        CHỌN trong danh sách - giúp nhìn ngay bước đó quét ở đâu trên màn
+        hình mà không cần mở lại chế độ chọn vùng. Vẽ lại Preview ngay (nếu
+        đang có sẵn 1 khung hình) để thấy hiệu lực tức thì kể cả khi KHÔNG
+        bật Xem Trực Tiếp."""
+        region_norm = None
+        if step:
+            act = step.get("action")
+            if act in ("wait_image", "if_image", "multi_image") and step.get("region"):
+                region_norm = step.get("region")
+            elif act == "ocr_text" and step.get("box"):
+                region_norm = step.get("box")
+        if region_norm == self._step_region_overlay:
+            return
+        self._step_region_overlay = region_norm
+        if self.current_screen_cv is not None and not self.is_streaming_active:
+            self.render_preview(self.current_screen_cv)
 
     def _on_inspect_label_resize(self, event=None):
         if not getattr(self, "active_inspect_path", None):
@@ -1893,6 +2044,17 @@ class MacroStudioApp:
             bx1, by1, bx2, by2 = highlight_box
             cv2.rectangle(resized, (int(bx1 * self.preview_scale), int(by1 * self.preview_scale)), (int(bx2 * self.preview_scale), int(by2 * self.preview_scale)), (0, 255, 0), 2)
 
+        # Vẽ đè VÙNG QUÉT (region/box) của bước ĐANG ĐƯỢC CHỌN trong danh
+        # sách (nếu có) - xem _update_region_overlay(). Toạ độ lưu theo tỉ
+        # lệ 0..1 trên TOÀN màn hình gốc nên nhân thẳng với preview_w/h hiện
+        # tại (không nhân với w/h gốc) là ra đúng vị trí trên canvas.
+        if getattr(self, "_step_region_overlay", None):
+            ox1, oy1, ox2, oy2 = self._step_region_overlay
+            px1, py1 = int(ox1 * self.preview_w), int(oy1 * self.preview_h)
+            px2, py2 = int(ox2 * self.preview_w), int(oy2 * self.preview_h)
+            cv2.rectangle(resized, (px1, py1), (px2, py2), (255, 190, 0), 2)
+            cv2.putText(resized, "Vùng quét", (px1 + 3, max(12, py1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 190, 0), 1, cv2.LINE_AA)
+
         rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
         self.tk_img = ImageTk.PhotoImage(Image.fromarray(rgb))
         self.canvas.delete("all")
@@ -2038,20 +2200,38 @@ class MacroStudioApp:
         dragged = abs(x2 - x1) > 20 or abs(y2 - y1) > 20
 
         if self.pending_action == "tap":
-            self._insert_step({"action": "tap", "pos": [rx1, ry1], "repeat": 1, "delay": 1.0, "comment": f"Tap [{int(rx1*100)}%, {int(ry1*100)}%]"})
-            threading.Thread(target=self._worker_send_tap, args=(rx1, ry1), daemon=True).start()
+            if self._tap_edit_idx is not None and 0 <= self._tap_edit_idx < len(self.steps):
+                idx = self._tap_edit_idx
+                self.steps[idx]["pos"] = [rx1, ry1]
+                self.steps[idx]["comment"] = f"Tap [{int(rx1*100)}%, {int(ry1*100)}%]"
+                self.refresh_tree()
+                self.tree.selection_set(str(idx))
+            else:
+                self._insert_step({"action": "tap", "pos": [rx1, ry1], "repeat": 1, "delay": 1.0, "comment": f"Tap [{int(rx1*100)}%, {int(ry1*100)}%]"})
+                threading.Thread(target=self._worker_send_tap, args=(rx1, ry1), daemon=True).start()
             self._cancel_pending_action()
             return
         elif self.pending_action == "swipe":
-            self._insert_step({"action": "swipe", "from": [rx1, ry1], "to": [rx2, ry2], "duration": 250, "repeat": 1, "delay": 1.0, "comment": f"Swipe"})
-            threading.Thread(target=self._worker_send_swipe, args=(rx1, ry1, rx2, ry2), daemon=True).start()
+            if self._swipe_edit_idx is not None and 0 <= self._swipe_edit_idx < len(self.steps):
+                idx = self._swipe_edit_idx
+                self.steps[idx]["from"] = [rx1, ry1]
+                self.steps[idx]["to"] = [rx2, ry2]
+                self.refresh_tree()
+                self.tree.selection_set(str(idx))
+            else:
+                self._insert_step({"action": "swipe", "from": [rx1, ry1], "to": [rx2, ry2], "duration": 250, "repeat": 1, "delay": 1.0, "comment": f"Swipe"})
+                threading.Thread(target=self._worker_send_swipe, args=(rx1, ry1, rx2, ry2), daemon=True).start()
             self._cancel_pending_action()
             return
         elif self.pending_action in ("wait_image", "if_image"):
+            edit_idx = self._image_edit_idx
+            # Không tự bắn tap thử khi đang CHỌN LẠI ảnh cho 1 bước đã có sẵn
+            # (chỉ muốn đổi ảnh mẫu, không muốn vô tình tap vào máy ảo).
+            do_tap = (self.pending_action == "wait_image") and edit_idx is None
             if dragged:
-                self._do_crop_custom(cached_screen, x1, y1, x2, y2, trigger_tap=(self.pending_action == "wait_image"), kind=self.pending_action)
+                self._do_crop_custom(cached_screen, x1, y1, x2, y2, trigger_tap=do_tap, kind=self.pending_action, edit_idx=edit_idx)
             else:
-                self._do_crop(cached_screen, int(x1 / self.preview_scale), int(y1 / self.preview_scale), rx1, ry1, trigger_tap=(self.pending_action == "wait_image"), kind=self.pending_action)
+                self._do_crop(cached_screen, int(x1 / self.preview_scale), int(y1 / self.preview_scale), rx1, ry1, trigger_tap=do_tap, kind=self.pending_action, edit_idx=edit_idx)
             self._cancel_pending_action()
             return
         elif self.pending_action == "image_region":
@@ -2113,17 +2293,23 @@ class MacroStudioApp:
                 self._insert_step({"action": "tap", "pos": [rx1, ry1], "repeat": 1, "delay": 1.0, "comment": f"Tap"})
                 threading.Thread(target=self._worker_send_tap, args=(rx1, ry1), daemon=True).start()
 
-    def _do_crop(self, screen_img, cx, cy, norm_x, norm_y, trigger_tap=False, kind="wait_image"):
+    def _do_crop(self, screen_img, cx, cy, norm_x, norm_y, trigger_tap=False, kind="wait_image", edit_idx=None):
         cw, ch = self.get_crop_wh()
         box = capture_tools.crop_fixed_box(screen_img, cx, cy, cw, ch)
         filename = capture_tools.save_crop(screen_img, box)
-        step = capture_tools.build_capture_step(kind, filename, int(self.spin_all_timeout.get() or 8), float(self.spin_all_conf.get() or 0.80))
-        self._insert_step(step)
+        if edit_idx is not None and 0 <= edit_idx < len(self.steps):
+            self.steps[edit_idx]["template"] = filename
+            self.steps[edit_idx]["comment"] = f"Ảnh: {filename}"
+            self.refresh_tree()
+            self.tree.selection_set(str(edit_idx))
+        else:
+            step = capture_tools.build_capture_step(kind, filename, int(self.spin_all_timeout.get() or 8), float(self.spin_all_conf.get() or 0.80))
+            self._insert_step(step)
         self.render_preview(screen_img, highlight_box=box)
         if trigger_tap:
             threading.Thread(target=self._worker_send_tap, args=(norm_x, norm_y), daemon=True).start()
 
-    def _do_crop_custom(self, screen_img, px1, py1, px2, py2, trigger_tap=False, kind="wait_image"):
+    def _do_crop_custom(self, screen_img, px1, py1, px2, py2, trigger_tap=False, kind="wait_image", edit_idx=None):
         px1, px2 = sorted((px1, px2))
         py1, py2 = sorted((py1, py2))
         scr_h, scr_w = screen_img.shape[:2]
@@ -2137,8 +2323,14 @@ class MacroStudioApp:
         self.spin_w.insert(0, str(x2 - x1))
         self.spin_h.delete(0, "end")
         self.spin_h.insert(0, str(y2 - y1))
-        step = capture_tools.build_capture_step(kind, filename, int(self.spin_all_timeout.get() or 8), float(self.spin_all_conf.get() or 0.80))
-        self._insert_step(step)
+        if edit_idx is not None and 0 <= edit_idx < len(self.steps):
+            self.steps[edit_idx]["template"] = filename
+            self.steps[edit_idx]["comment"] = f"Ảnh: {filename}"
+            self.refresh_tree()
+            self.tree.selection_set(str(edit_idx))
+        else:
+            step = capture_tools.build_capture_step(kind, filename, int(self.spin_all_timeout.get() or 8), float(self.spin_all_conf.get() or 0.80))
+            self._insert_step(step)
         self.render_preview(screen_img, highlight_box=box)
         if trigger_tap:
             threading.Thread(target=self._worker_send_tap, args=(round(((x1 + x2) / 2) / scr_w, 4), round(((y1 + y2) / 2) / scr_h, 4)), daemon=True).start()
@@ -2239,8 +2431,13 @@ class MacroStudioApp:
             tag, indent_str = "tag_tap", "│   " * indent_level
 
             if act == "if_image":
-                detail = f"{indent_str}┌── [IF Ảnh] {s.get('comment', '')}"
-                tag, indent_level = "tag_logic", indent_level + 1
+                if not s.get("template") and not s.get("templates"):
+                    detail = f"{indent_str}┌── [IF Ảnh] ⚠️ CHƯA CHỌN ẢNH ({s.get('comment', '')})"
+                    tag = "tag_warn"
+                else:
+                    detail = f"{indent_str}┌── [IF Ảnh] {s.get('comment', '')}"
+                    tag = "tag_logic"
+                indent_level += 1
             elif act == "else":
                 detail = f"{indent_str}├── [ELSE]"
                 tag = "tag_logic"
@@ -2252,15 +2449,27 @@ class MacroStudioApp:
                 detail = f"{indent_str}├── [OR] Quét đa ảnh"
                 tag = "tag_multi"
             elif act == "wait_image":
-                detail = f"{indent_str}├── Ảnh: {s.get('template')} ({s.get('comment', '')})"
-                tag = "tag_image"
+                if not s.get("template"):
+                    detail = f"{indent_str}├── ⚠️ CHƯA CHỌN ẢNH ({s.get('comment', '')})"
+                    tag = "tag_warn"
+                else:
+                    detail = f"{indent_str}├── Ảnh: {s.get('template')} ({s.get('comment', '')})"
+                    tag = "tag_image"
             elif act == "tap":
-                detail = f"{indent_str}├── Tap {s.get('pos')} ({s.get('comment', '')})"
-                tag = "tag_tap"
+                if not s.get("pos"):
+                    detail = f"{indent_str}├── ⚠️ CHƯA CHỌN TỌA ĐỘ ({s.get('comment', '')})"
+                    tag = "tag_warn"
+                else:
+                    detail = f"{indent_str}├── Tap {s.get('pos')} ({s.get('comment', '')})"
+                    tag = "tag_tap"
             elif act == "swipe":
-                hold_ms = s.get("hold_ms", 0)
-                detail = f"{indent_str}├── Swipe" + (f" (🐢 Giữ Cuối {hold_ms}ms)" if hold_ms else "")
-                tag = "tag_swipe"
+                if not (s.get("from") and s.get("to")):
+                    detail = f"{indent_str}├── ⚠️ CHƯA CHỌN ĐIỂM ĐẦU/CUỐI ({s.get('comment', '')})"
+                    tag = "tag_warn"
+                else:
+                    hold_ms = s.get("hold_ms", 0)
+                    detail = f"{indent_str}├── Swipe" + (f" (🐢 Giữ Cuối {hold_ms}ms)" if hold_ms else "")
+                    tag = "tag_swipe"
             elif act == "sleep":
                 detail = f"{indent_str}├── Chờ {s.get('delay')}s"
                 tag = "tag_sleep"
