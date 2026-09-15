@@ -161,8 +161,13 @@ class DashboardApp(
             "auto_login": bool(self.auto_login_var.get()) if hasattr(self, "auto_login_var") else False,
             "account_rotate": bool(self.account_rotate_var.get()) if hasattr(self, "account_rotate_var") else False,
             "shutdown_after": bool(self.shutdown_after_var.get()) if hasattr(self, "shutdown_after_var") else False,
+            "shutdown_after_by_emulator": getattr(self, "_shutdown_after_by_emulator", {}) or {},
             "post_login_after": bool(self.post_login_after_var.get()) if hasattr(self, "post_login_after_var") else False,
-            "post_login_account_id": getattr(self, "_post_login_account_id", None),
+            # TK riêng theo từng giả lập (mới) - "post_login_account_id" (cũ, dùng
+            # chung 1 TK cho mọi giả lập) không còn được GHI nữa nhưng vẫn được ĐỌC
+            # làm giá trị dự phòng ở _get_post_run_account() nếu 1 giả lập chưa có
+            # TK riêng, để không mất cấu hình của người dùng bản cũ.
+            "post_login_account_by_emulator": getattr(self, "_post_login_account_by_emulator", {}) or {},
             "shop_settings": self.shop_settings,
             "ldconsole_path": getattr(self.emu_manager, "ldconsole_path", None),
         }

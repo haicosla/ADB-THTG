@@ -21,7 +21,7 @@ import task_registry
 import run_state
 import account_manager
 from dashboard_theme import *
-from dashboard_widgets import RoundedButton, _bind_esc_close
+from dashboard_widgets import RoundedButton, DarkCheck, _bind_esc_close
 
 
 class RunMixin:
@@ -246,16 +246,21 @@ class RunMixin:
         hoặc đăng nhập lại ngay sau khi vừa bị dừng dở dang dễ gây hiểu
         nhầm/ghi đè trạng thái người dùng đang muốn giữ nguyên để kiểm tra.
 
-        Nếu CẢ 2 tuỳ chọn cùng bật: ưu tiên TẮT GIẢ LẬP (đăng nhập xong rồi
-        tắt ngay sau đó là vô nghĩa) - chỉ cảnh báo, không coi là lỗi."""
+        CẢ 2 tuỳ chọn đều có 2 lớp: 1 công tắc TỔNG (checkbox ở thanh trên -
+        bật/tắt cả tính năng) + 1 lựa chọn RIÊNG cho từng giả lập (nút
+        '⚙'/'🎯' cạnh checkbox - giả lập nào áp dụng, giả lập nào bỏ qua /
+        TK nào). Nếu CẢ 2 tuỳ chọn cùng áp dụng cho đúng giả lập này: ưu
+        tiên TẮT GIẢ LẬP (đăng nhập xong rồi tắt ngay sau đó là vô nghĩa) -
+        chỉ cảnh báo, không coi là lỗi."""
         if self.stop_flag:
             return
 
-        want_shutdown = bool(getattr(self, "shutdown_after_var", None) and self.shutdown_after_var.get())
+        want_shutdown = bool(getattr(self, "shutdown_after_var", None) and self.shutdown_after_var.get()
+                              and self._shutdown_after_enabled_for_emulator(emulator))
         want_post_login = bool(getattr(self, "post_login_after_var", None) and self.post_login_after_var.get())
 
         if want_shutdown:
-            if want_post_login:
+            if want_post_login and self._get_post_run_account(emulator):
                 self._log("warn", f"Đã bật cả 'Tắt Giả Lập' và 'Đăng Nhập TK Chỉ Định' sau khi chạy xong trên "
                                    f"'{emulator.name}' - ưu tiên TẮT GIẢ LẬP, bỏ qua đăng nhập.",
                            emulator_name=emulator.name)
@@ -269,11 +274,12 @@ class RunMixin:
             return
 
         if want_post_login:
-            acc = self._get_post_run_account()
+            acc = self._get_post_run_account(emulator)
             if not acc:
                 self._log("warn", f"Đã bật 'Đăng Nhập TK Chỉ Định Sau Khi Chạy Xong' nhưng chưa chọn Tài khoản "
-                                   f"hợp lệ (bấm '🎯 Chọn TK' để chọn, hoặc tài khoản đã chọn đang TẮT/bị xoá) - "
-                                   f"bỏ qua trên '{emulator.name}'.", emulator_name=emulator.name)
+                                   f"hợp lệ cho giả lập này (bấm '🎯 Chọn TK Theo Giả Lập' để chọn riêng cho "
+                                   f"'{emulator.name}', hoặc tài khoản đã chọn đang TẮT/bị xoá) - bỏ qua trên "
+                                   f"'{emulator.name}'.", emulator_name=emulator.name)
                 return
             login_entry = task_registry.find_task(self.tasks, "account_login")
             if not login_entry:
@@ -286,10 +292,102 @@ class RunMixin:
             preset_vars = {"tk_user": acc.get("username", ""), "tk_pass": acc.get("password", "")}
             self._exec_entry(engine, emulator, login_entry, preset_vars=preset_vars, tracked=False)
 
-    def _get_post_run_account(self):
-        """Trả về dict Tài khoản đã chọn cho tuỳ chọn 'Đăng Nhập TK Chỉ
-        Định Sau Khi Chạy Xong' (None nếu chưa chọn/đã bị xoá/đang TẮT)."""
-        aid = getattr(self, "_post_login_account_id", None) or self._settings.get("post_login_account_id")
+    def _shutdown_after_enabled_for_emulator(self, emulator):
+        """True nếu giả lập này được ÁP DỤNG tuỳ chọn 'Tắt Giả Lập Sau Khi
+        Chạy Xong' (chỉ có ý nghĩa khi công tắc TỔNG shutdown_after_var
+        đang bật - xem _apply_post_run_options).
+
+        self._shutdown_after_by_emulator là dict khoá str(emulator.index)
+        -> True/False, chỉnh qua popup '⚙ Chọn Giả Lập' cạnh checkbox.
+        Giả lập CHƯA từng được cấu hình riêng (chưa mở popup, hoặc là giả
+        lập mới quét thêm sau) mặc định TRUE - giữ đúng hành vi bản cũ
+        (checkbox tổng áp dụng cho MỌI giả lập) cho tới khi người dùng chủ
+        động bỏ tick giả lập nào đó."""
+        mapping = getattr(self, "_shutdown_after_by_emulator", None) or {}
+        return bool(mapping.get(str(emulator.index), True))
+
+    def _shutdown_after_label_text(self):
+        """Chuỗi hiển thị cạnh nút '⚙ Chọn Giả Lập' của tuỳ chọn 'Tắt Giả
+        Lập Sau Khi Chạy Xong' - tóm tắt có bao nhiêu giả lập đang bị LOẠI
+        TRỪ khỏi tuỳ chọn này (không tính giả lập nào = áp dụng cho tất cả,
+        giống hành vi bản cũ)."""
+        mapping = getattr(self, "_shutdown_after_by_emulator", None) or {}
+        excluded = sum(1 for v in mapping.values() if not v)
+        return f"(bỏ qua {excluded} giả lập)" if excluded else "(áp dụng cho tất cả giả lập)"
+
+    def _pick_shutdown_emulators(self):
+        """Popup liệt kê TỪNG giả lập đang có, cho phép bỏ tick giả lập
+        nào KHÔNG muốn tự tắt sau khi chạy xong - dùng cho tuỳ chọn '🔌
+        Tắt Giả Lập Sau Khi Chạy Xong' (công tắc tổng vẫn phải bật thì
+        lựa chọn ở đây mới có tác dụng)."""
+        if not getattr(self, "emulators", None):
+            messagebox.showinfo("Chưa có giả lập",
+                                 "Chưa quét được giả lập nào - bấm '🔄 Quét Giả Lập' rồi thử lại.")
+            return
+
+        mapping = getattr(self, "_shutdown_after_by_emulator", None)
+        if mapping is None:
+            mapping = {}
+            self._shutdown_after_by_emulator = mapping
+
+        win = tk.Toplevel(self.root)
+        win.title("Chọn Giả Lập Áp Dụng 'Tắt Sau Khi Chạy Xong'")
+        win.configure(bg=COL_PANEL)
+        win.geometry("380x460")
+        _bind_esc_close(win)
+
+        tk.Label(win, text="Bỏ tick giả lập nào KHÔNG muốn tự tắt sau khi chạy xong. Mặc định TẤT CẢ giả lập "
+                            "đều áp dụng khi công tắc '🔌 Tắt Giả Lập Sau Khi Chạy Xong' ở trên đang BẬT:",
+                 bg=COL_PANEL, fg=COL_TEXT, font=("Segoe UI", 9, "bold"),
+                 wraplength=340, justify="left").pack(anchor="w", padx=12, pady=(12, 6))
+
+        canvas = tk.Canvas(win, bg=COL_PANEL, highlightthickness=0)
+        vbar = ttk.Scrollbar(win, orient="vertical", command=canvas.yview)
+        inner = tk.Frame(canvas, bg=COL_PANEL)
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.configure(yscrollcommand=vbar.set)
+        canvas.pack(side="left", fill="both", expand=True, padx=(12, 0), pady=6)
+        vbar.pack(side="right", fill="y", padx=(0, 6))
+
+        def _on_wheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_wheel)
+        win.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+        check_vars = {}
+        for e in self.emulators:
+            var = tk.BooleanVar(value=bool(mapping.get(str(e.index), True)))
+            check_vars[e.index] = var
+            label = f"🟢 {e.name}" if e.running else f"⚪ {e.name} (đang tắt)"
+            DarkCheck(inner, label, var, bg=COL_PANEL_ALT).pack(anchor="w", padx=8, pady=4, fill="x")
+
+        def _save():
+            for idx, var in check_vars.items():
+                mapping[str(idx)] = bool(var.get())
+            self._save_settings()
+            if hasattr(self, "lbl_shutdown_after"):
+                self.lbl_shutdown_after.config(text=self._shutdown_after_label_text())
+            win.destroy()
+
+        RoundedButton(win, "💾 Lưu", command=_save, bg=COL_GREEN, container_bg=COL_PANEL,
+                      font=("Segoe UI", 9, "bold"), padx=16, pady=6).pack(side="bottom", pady=10)
+
+    def _get_post_run_account(self, emulator):
+        """Trả về dict Tài khoản đã chọn RIÊNG cho `emulator` này, dùng cho
+        tuỳ chọn 'Đăng Nhập TK Chỉ Định Sau Khi Chạy Xong' (None nếu giả
+        lập này chưa được gán TK / TK đã chọn đã bị xoá / đang TẮT).
+
+        Mỗi giả lập có 1 TK riêng (self._post_login_account_by_emulator,
+        khoá là str(emulator.index)) - cho phép ví dụ giả lập A tự đăng
+        nhập TK 'shop1' còn giả lập B tự đăng nhập TK 'shop2' sau khi mỗi
+        giả lập chạy xong, thay vì dùng chung đúng 1 TK cho mọi giả lập.
+
+        Tương thích ngược: nếu giả lập chưa có TK riêng, thử dùng
+        'post_login_account_id' (cấu hình bản CŨ trước khi hỗ trợ chọn
+        theo giả lập - lúc đó chỉ có đúng 1 TK dùng chung)."""
+        mapping = getattr(self, "_post_login_account_by_emulator", None) or {}
+        aid = mapping.get(str(emulator.index)) or self._settings.get("post_login_account_id")
         if not aid:
             return None
         for a in account_manager.load_accounts():
@@ -380,11 +478,20 @@ class RunMixin:
         self._log("info", "══════ Kết thúc phiên chạy ══════")
 
     # ================= QUẢN LÝ TÀI KHOẢN (xoay vòng) =================
-    def _post_login_account_label_text(self):
-        """Chuỗi hiển thị cạnh nút '🎯 Chọn TK' - tên Tài khoản đang được
-        chọn cho tuỳ chọn 'Đăng Nhập TK Chỉ Định Sau Khi Chạy Xong' (hoặc
-        thông báo chưa chọn / tài khoản đã bị xoá)."""
-        aid = getattr(self, "_post_login_account_id", None)
+    def _post_login_account_label_text(self, emulator_index=None):
+        """Chuỗi hiển thị Tài khoản đang được gán cho tuỳ chọn 'Đăng Nhập
+        TK Chỉ Định Sau Khi Chạy Xong'.
+
+        - emulator_index=None (dùng cho nhãn tóm tắt ở thanh trên): trả về
+          số giả lập đã được gán TK riêng.
+        - emulator_index=<số> (dùng trong popup chọn theo giả lập): trả về
+          tên TK đã gán cho ĐÚNG giả lập đó (hoặc thông báo chưa chọn /
+          TK đã bị xoá)."""
+        mapping = getattr(self, "_post_login_account_by_emulator", None) or {}
+        if emulator_index is None:
+            n = len(mapping)
+            return f"Đã gán TK riêng cho {n} giả lập" if n else "(chưa gán TK cho giả lập nào)"
+        aid = mapping.get(str(emulator_index))
         if not aid:
             return "(chưa chọn TK)"
         for a in account_manager.load_accounts():
@@ -394,9 +501,68 @@ class RunMixin:
         return "(TK đã chọn đã bị xoá)"
 
     def _pick_post_login_account(self):
-        """Popup chọn ĐÚNG 1 Tài khoản dùng cho tuỳ chọn 'Đăng Nhập TK Chỉ
-        Định Sau Khi Chạy Xong' - khác với popup chọn NHIỀU tài khoản
-        (_open_multi_select_dialog) dùng cho Xoay Vòng/Hẹn Giờ."""
+        """Popup liệt kê TỪNG giả lập đang có, cho phép gán RIÊNG 1 Tài
+        khoản cho mỗi giả lập (dùng cho tuỳ chọn 'Đăng Nhập TK Chỉ Định
+        Sau Khi Chạy Xong') - khác với popup chọn NHIỀU tài khoản dùng
+        chung (_open_multi_select_dialog) cho Xoay Vòng/Hẹn Giờ, và khác
+        bản cũ vốn chỉ cho chọn ĐÚNG 1 TK áp dụng chung cho mọi giả lập."""
+        if not getattr(self, "emulators", None):
+            messagebox.showinfo("Chưa có giả lập",
+                                 "Chưa quét được giả lập nào - bấm '🔄 Quét Giả Lập' rồi thử lại.")
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("Chọn Tài Khoản Đăng Nhập Theo Giả Lập")
+        win.configure(bg=COL_PANEL)
+        win.geometry("440x480")
+        _bind_esc_close(win)
+
+        tk.Label(win, text="Mỗi giả lập có thể gán 1 Tài khoản RIÊNG để tự đăng nhập ngay sau khi "
+                            "giả lập đó chạy xong (cần Hoạt Động 'account_login' để hoạt động):",
+                 bg=COL_PANEL, fg=COL_TEXT, font=("Segoe UI", 9, "bold"),
+                 wraplength=400, justify="left").pack(anchor="w", padx=12, pady=(12, 6))
+
+        canvas = tk.Canvas(win, bg=COL_PANEL, highlightthickness=0)
+        vbar = ttk.Scrollbar(win, orient="vertical", command=canvas.yview)
+        inner = tk.Frame(canvas, bg=COL_PANEL)
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.configure(yscrollcommand=vbar.set)
+        canvas.pack(side="left", fill="both", expand=True, padx=(12, 0), pady=6)
+        vbar.pack(side="right", fill="y", padx=(0, 6))
+
+        def _on_wheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_wheel)
+        win.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+        row_labels = {}
+
+        def _refresh_row(idx):
+            lbl = row_labels.get(idx)
+            if lbl:
+                lbl.config(text=self._post_login_account_label_text(idx))
+            if hasattr(self, "lbl_post_login_account"):
+                self.lbl_post_login_account.config(text=self._post_login_account_label_text())
+
+        for e in self.emulators:
+            row = tk.Frame(inner, bg=COL_PANEL_ALT)
+            row.pack(fill="x", pady=3, padx=4)
+            tk.Label(row, text=e.name, bg=COL_PANEL_ALT, fg=COL_TEXT, font=("Segoe UI", 9, "bold"),
+                     width=16, anchor="w").pack(side="left", padx=8, pady=6)
+            lbl = tk.Label(row, text=self._post_login_account_label_text(e.index), bg=COL_PANEL_ALT,
+                           fg=COL_TEXT_MUTED, font=("Segoe UI", 8))
+            lbl.pack(side="left", padx=4, pady=6, fill="x", expand=True)
+            row_labels[e.index] = lbl
+            RoundedButton(row, "🎯 Chọn TK", command=lambda idx=e.index: self._pick_account_for_emulator(idx, _refresh_row),
+                          bg=COL_PURPLE, container_bg=COL_PANEL_ALT, font=("Segoe UI", 8, "bold")).pack(
+                side="right", padx=8, pady=4)
+
+    def _pick_account_for_emulator(self, emulator_index, on_done=None):
+        """Popup chọn ĐÚNG 1 Tài khoản gán cho 1 giả lập cụ thể
+        (`emulator_index`) - mở ra từ 1 dòng giả lập trong
+        _pick_post_login_account(). Gọi `on_done(emulator_index)` sau khi
+        lưu xong để cập nhật lại nhãn hiển thị."""
         accounts = account_manager.load_accounts()
         win = tk.Toplevel(self.root)
         win.title("Chọn Tài Khoản Đăng Nhập Sau Khi Chạy Xong")
@@ -404,7 +570,7 @@ class RunMixin:
         win.geometry("380x460")
         _bind_esc_close(win)
 
-        tk.Label(win, text="Chọn 1 Tài khoản để tự đăng nhập ngay sau khi giả lập chạy xong "
+        tk.Label(win, text="Chọn 1 Tài khoản để tự đăng nhập ngay sau khi giả lập này chạy xong "
                             "(cần Hoạt Động 'account_login' để hoạt động):",
                  bg=COL_PANEL, fg=COL_TEXT, font=("Segoe UI", 9, "bold"),
                  wraplength=350, justify="left").pack(anchor="w", padx=12, pady=(12, 6))
@@ -428,18 +594,27 @@ class RunMixin:
                      bg=COL_PANEL, fg=COL_TEXT_MUTED, wraplength=320, justify="left").pack(pady=20, padx=8)
 
         def _choose(acc_id):
-            self._post_login_account_id = acc_id
-            self.lbl_post_login_account.config(text=self._post_login_account_label_text())
+            mapping = getattr(self, "_post_login_account_by_emulator", None)
+            if mapping is None:
+                mapping = {}
+                self._post_login_account_by_emulator = mapping
+            if acc_id:
+                mapping[str(emulator_index)] = acc_id
+            else:
+                mapping.pop(str(emulator_index), None)
             self._save_settings()
+            if on_done:
+                on_done(emulator_index)
             win.destroy()
 
         row = tk.Frame(inner, bg=COL_PANEL_ALT)
         row.pack(fill="x", pady=3, padx=4)
-        tk.Label(row, text="— Bỏ chọn (không dùng tuỳ chọn này) —", bg=COL_PANEL_ALT, fg=COL_TEXT_MUTED,
-                 font=("Segoe UI", 9, "italic")).pack(side="left", padx=8, pady=6)
+        tk.Label(row, text="— Bỏ chọn (không dùng tuỳ chọn này cho giả lập này) —", bg=COL_PANEL_ALT,
+                 fg=COL_TEXT_MUTED, font=("Segoe UI", 9, "italic")).pack(side="left", padx=8, pady=6)
         RoundedButton(row, "Chọn", command=lambda: _choose(None), bg=COL_RED, container_bg=COL_PANEL_ALT,
                       font=("Segoe UI", 8, "bold"), padx=10, pady=4).pack(side="right", padx=8, pady=4)
 
+        current_id = (getattr(self, "_post_login_account_by_emulator", {}) or {}).get(str(emulator_index))
         for a in accounts:
             aid = a.get("id")
             ten = a.get("ten_hien_thi") or a.get("username") or aid
@@ -447,7 +622,7 @@ class RunMixin:
             row = tk.Frame(inner, bg=COL_PANEL_ALT)
             row.pack(fill="x", pady=3, padx=4)
             label_text = f"{ten}" + (f"  [{nhom}]" if nhom else "")
-            fg = COL_ACCENT if aid == getattr(self, "_post_login_account_id", None) else COL_TEXT
+            fg = COL_ACCENT if aid == current_id else COL_TEXT
             tk.Label(row, text=label_text, bg=COL_PANEL_ALT, fg=fg, font=("Segoe UI", 9)).pack(
                 side="left", padx=8, pady=6)
             RoundedButton(row, "Chọn", command=lambda i=aid: _choose(i), bg=COL_GREEN, container_bg=COL_PANEL_ALT,

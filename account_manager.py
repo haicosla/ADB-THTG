@@ -119,6 +119,61 @@ def mark_run(entries, account_id, path=ACCOUNTS_PATH):
     return entries
 
 
+GROUP_PRESETS_PATH = "account_groups.json"
+
+
+def load_group_presets(path=GROUP_PRESETS_PATH):
+    """Đọc danh sách tên Nhóm được LƯU SẴN làm gợi ý (hiện trong combobox
+    'Nhóm' + nút lọc nhanh ở '👥 Quản Lý Tài Khoản') NGAY CẢ KHI chưa có
+    tài khoản nào thuộc nhóm đó - khác với nhóm suy ra tự động từ
+    accounts.json (chỉ thấy khi đã có >=1 tài khoản gắn nhóm đó, xem
+    list_groups() ở trên). Nếu chưa từng lưu file này (lần đầu dùng), trả
+    về đúng 2 gợi ý mặc định cũ ('Acc chính', 'Clone') để không đổi trải
+    nghiệm người dùng đang dùng bản trước."""
+    if not os.path.exists(path):
+        return ["Acc chính", "Clone"]
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            cleaned = [str(g).strip() for g in data if str(g).strip()]
+            if cleaned:
+                return cleaned
+    except Exception:
+        pass
+    return ["Acc chính", "Clone"]
+
+
+def save_group_presets(groups, path=GROUP_PRESETS_PATH):
+    """Lưu danh sách tên Nhóm gợi ý (loại trùng - không phân biệt
+    hoa/thường, giữ nguyên thứ tự xuất hiện đầu tiên). Trả về danh sách đã
+    dọn dẹp."""
+    seen = set()
+    cleaned = []
+    for g in groups:
+        g = str(g).strip()
+        key = g.lower()
+        if g and key not in seen:
+            seen.add(key)
+            cleaned.append(g)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cleaned, f, indent=2, ensure_ascii=False)
+    return cleaned
+
+
+def add_group_preset(name, path=GROUP_PRESETS_PATH):
+    """Thêm 1 tên Nhóm MỚI vào danh sách gợi ý đã lưu (bỏ qua nếu tên
+    trống hoặc đã có sẵn, không phân biệt hoa/thường). Trả về danh sách
+    gợi ý sau khi thêm - dùng để cập nhật lại combobox/nút lọc ngay mà
+    không cần đóng mở lại cửa sổ '👥 Quản Lý Tài Khoản'."""
+    name = str(name).strip()
+    presets = load_group_presets(path)
+    if not name or name.lower() in {p.lower() for p in presets}:
+        return presets
+    presets.append(name)
+    return save_group_presets(presets, path)
+
+
 def list_groups(entries):
     """Danh sách các Nhóm tài khoản đã tồn tại (bỏ chuỗi rỗng), sắp xếp theo
     bảng chữ cái - dùng để gợi ý trong combobox 'Nhóm' và dựng các nút lọc

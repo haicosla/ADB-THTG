@@ -56,6 +56,9 @@ class UIBuildMixin:
         RoundedButton(actions_bar, "👥 Quản Lý Tài Khoản", command=self._open_account_manager,
                       bg=COL_PURPLE, container_bg=COL_BG, font=("Segoe UI", 9, "bold")).pack(side="left", padx=3)
 
+        RoundedButton(actions_bar, "⚡ Log Nhanh", command=self._open_quick_login_dialog,
+                      bg=COL_GREEN, container_bg=COL_BG, font=("Segoe UI", 9, "bold")).pack(side="left", padx=3)
+
         RoundedButton(actions_bar, "⏰ Hẹn Giờ", command=self._open_schedule_manager,
                       bg=COL_TEAL, container_bg=COL_BG, font=("Segoe UI", 9, "bold")).pack(side="left", padx=3)
 
@@ -70,15 +73,30 @@ class UIBuildMixin:
         DarkCheck(actions_bar2, "🔌 Tắt Giả Lập Sau Khi Chạy Xong", self.shutdown_after_var,
                   bg=COL_BG).pack(side="left", padx=10)
 
+        # Giả lập nào áp dụng / bỏ qua tuỳ chọn tắt giả lập ở trên - mỗi
+        # giả lập độc lập (self._shutdown_after_by_emulator, khoá là
+        # str(emulator.index)) thay vì luôn áp dụng cho MỌI giả lập -
+        # xem _pick_shutdown_emulators() / _shutdown_after_enabled_for_emulator()
+        # ở dashboard_run.py.
+        self._shutdown_after_by_emulator = self._settings.get("shutdown_after_by_emulator", {}) or {}
+        self.lbl_shutdown_after = tk.Label(actions_bar2, text=self._shutdown_after_label_text(),
+                                            bg=COL_BG, fg=COL_TEXT_MUTED, font=("Segoe UI", 8))
+        self.lbl_shutdown_after.pack(side="left", padx=(0, 4))
+        RoundedButton(actions_bar2, "⚙ Chọn Giả Lập", command=self._pick_shutdown_emulators,
+                      bg=COL_PURPLE, container_bg=COL_BG, font=("Segoe UI", 8, "bold")).pack(side="left", padx=(0, 10))
+
         self.post_login_after_var = tk.BooleanVar(value=bool(self._settings.get("post_login_after", False)))
         DarkCheck(actions_bar2, "🔑 Đăng Nhập TK Chỉ Định Sau Khi Chạy Xong", self.post_login_after_var,
                   bg=COL_BG).pack(side="left", padx=10)
 
-        self._post_login_account_id = self._settings.get("post_login_account_id")
+        # Mỗi giả lập được gán 1 Tài khoản RIÊNG (self._post_login_account_by_emulator,
+        # khoá là str(emulator.index)) thay vì dùng chung đúng 1 TK cho mọi giả lập -
+        # xem _pick_post_login_account() / _get_post_run_account() ở dashboard_run.py.
+        self._post_login_account_by_emulator = self._settings.get("post_login_account_by_emulator", {}) or {}
         self.lbl_post_login_account = tk.Label(actions_bar2, text=self._post_login_account_label_text(),
                                                 bg=COL_BG, fg=COL_TEXT_MUTED, font=("Segoe UI", 8))
         self.lbl_post_login_account.pack(side="left", padx=(0, 4))
-        RoundedButton(actions_bar2, "🎯 Chọn TK", command=self._pick_post_login_account,
+        RoundedButton(actions_bar2, "🎯 Chọn TK Theo Giả Lập", command=self._pick_post_login_account,
                       bg=COL_PURPLE, container_bg=COL_BG, font=("Segoe UI", 8, "bold")).pack(side="left", padx=(0, 10))
 
         RoundedButton(actions_bar, "🚗 Quét Xe", command=lambda: self._quick_action("quet_xe"),

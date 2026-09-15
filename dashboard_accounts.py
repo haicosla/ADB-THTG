@@ -215,7 +215,9 @@ class AccountsMixin:
             text="Tài khoản ở đây KHÔNG gán cố định theo 1 giả lập nào - bạn tự chọn tài khoản chạy trên giả lập "
                  "nào ngay lúc bấm '👥 Xoay Vòng Tài Khoản' hoặc lúc soạn 1 lịch hẹn giờ (dùng lại được cùng danh "
                  "sách này cho bất kỳ giả lập/lịch nào). Có thể gắn 1 Nhóm - gõ tên tuỳ ý, không giới hạn chỉ "
-                 "'Clone' / 'Acc chính' - để lọc/chọn nhanh. Khi xoay vòng: Dashboard tự BẬT giả lập nếu đang tắt, "
+                 "'Clone' / 'Acc chính' (dùng ô 'Thêm Nhóm mới' ở trên để lưu hẳn 1 tên Nhóm vào danh sách gợi ý, "
+                 "hiện sẵn cho cả những lần sau dù chưa có tài khoản nào thuộc nhóm đó) - để lọc/chọn nhanh. Khi "
+                 "xoay vòng: Dashboard tự BẬT giả lập nếu đang tắt, "
                  "rồi lần lượt từng tài khoản: Đăng Xuất -> Đăng Nhập (điền {tk_user}/{tk_pass}) -> chạy các tác vụ "
                  "đang tick -> sang tài khoản kế tiếp. Cần soạn sẵn 2 Hoạt Động 'account_login' và 'account_logout' "
                  "(xem '📖 Hướng Dẫn').",
@@ -228,6 +230,20 @@ class AccountsMixin:
                  font=("Segoe UI", 8)).pack(side="left", padx=(0, 6))
         filter_btns_frame = FlowBar(filter_bar, bg=COL_PANEL)
         filter_btns_frame.pack(side="left", fill="x", expand=True)
+
+        # Thêm hẳn 1 tên Nhóm MỚI vào danh sách GỢI Ý đã lưu (account_groups.json)
+        # - khác với gõ tay trực tiếp vào ô 'Nhóm' của 1 dòng tài khoản (chỉ lưu
+        # cho đúng dòng đó): tên thêm ở đây sẽ hiện sẵn trong combobox 'Nhóm' của
+        # TẤT CẢ các dòng (kể cả dòng mới thêm sau) NGAY CẢ KHI chưa có tài khoản
+        # nào gán vào nhóm đó.
+        new_group_var = tk.StringVar()
+        RoundedButton(filter_bar, "➕ Thêm Nhóm", command=lambda: _add_group_preset(),
+                      bg=COL_BLUE, container_bg=COL_PANEL, font=("Segoe UI", 8, "bold"),
+                      padx=8, pady=3).pack(side="right", padx=(4, 0))
+        tk.Entry(filter_bar, textvariable=new_group_var, width=12, bg=COL_PANEL, fg=COL_TEXT,
+                 insertbackground=COL_TEXT, relief="flat").pack(side="right", padx=(4, 0))
+        tk.Label(filter_bar, text="Thêm Nhóm mới:", bg=COL_PANEL, fg=COL_TEXT_MUTED,
+                 font=("Segoe UI", 8)).pack(side="right", padx=(10, 0))
 
         header = tk.Frame(win, bg=COL_HEADER)
         header.pack(fill="x", padx=10)
@@ -254,12 +270,14 @@ class AccountsMixin:
 
         row_widgets = []
 
-        # Gợi ý Nhóm: nhóm đã có sẵn trong dữ liệu + vài nhóm phổ biến mặc
-        # định (Acc chính / Clone) để người dùng chọn nhanh thay vì phải gõ
-        # tay ngay từ đầu - vẫn gõ tay được tên nhóm khác tuỳ ý (combobox
-        # KHÔNG readonly).
+        # Gợi ý Nhóm: danh sách đã LƯU SẴN (account_groups.json - mặc định
+        # 'Acc chính'/'Clone' nếu chưa từng lưu, có thể bổ sung thêm qua ô
+        # 'Thêm Nhóm mới' phía trên) + nhóm đã có sẵn trong dữ liệu tài
+        # khoản nhưng chưa được lưu vào danh sách gợi ý - vẫn gõ tay được
+        # tên nhóm khác tuỳ ý (combobox KHÔNG readonly).
+        saved_presets = account_manager.load_group_presets()
         existing_groups = sorted({(a.get("nhom") or "").strip() for a in self.accounts if (a.get("nhom") or "").strip()})
-        group_suggestions = ["Acc chính", "Clone"] + [g for g in existing_groups if g not in ("Acc chính", "Clone")]
+        group_suggestions = list(saved_presets) + [g for g in existing_groups if g not in saved_presets]
 
         def _add_row(acc):
             row = tk.Frame(inner, bg=COL_PANEL_ALT)
@@ -281,7 +299,8 @@ class AccountsMixin:
                      insertbackground=COL_TEXT, relief="flat").pack(side="left", padx=2)
 
             nhom_var = tk.StringVar(value=acc.get("nhom", ""))
-            ttk.Combobox(row, textvariable=nhom_var, values=group_suggestions, width=12).pack(side="left", padx=2)
+            nhom_combo = ttk.Combobox(row, textvariable=nhom_var, values=group_suggestions, width=12)
+            nhom_combo.pack(side="left", padx=2)
 
             ghichu_var = tk.StringVar(value=acc.get("ghi_chu", ""))
             tk.Entry(row, textvariable=ghichu_var, width=12, bg=COL_PANEL, fg=COL_TEXT,
@@ -293,7 +312,7 @@ class AccountsMixin:
             rid = acc.get("id") or account_manager.new_account_id()
             rw = {
                 "id": rid, "bat_var": bat_var, "ten_var": ten_var, "user_var": user_var,
-                "pass_var": pass_var, "nhom_var": nhom_var, "ghichu_var": ghichu_var,
+                "pass_var": pass_var, "nhom_var": nhom_var, "nhom_combo": nhom_combo, "ghichu_var": ghichu_var,
                 "lan_chay_cuoi": acc.get("lan_chay_cuoi"), "row": row,
             }
 
@@ -334,6 +353,22 @@ class AccountsMixin:
 
         _rebuild_filter_buttons()
 
+        def _add_group_preset():
+            """Lưu tên Nhóm mới gõ ở ô 'Thêm Nhóm mới' vào account_groups.json,
+            rồi cập nhật NGAY combobox 'Nhóm' của mọi dòng đang mở + nút lọc
+            nhanh - không cần đóng mở lại cửa sổ này."""
+            name = new_group_var.get().strip()
+            if not name:
+                return
+            updated_presets = account_manager.add_group_preset(name)
+            new_group_var.set("")
+            groups_in_rows = sorted({(rw["nhom_var"].get() or "").strip() for rw in row_widgets
+                                      if (rw["nhom_var"].get() or "").strip()})
+            all_suggestions = list(updated_presets) + [g for g in groups_in_rows if g not in updated_presets]
+            for rw in row_widgets:
+                rw["nhom_combo"]["values"] = all_suggestions
+            _rebuild_filter_buttons()
+
         btn_bar.add(RoundedButton(btn_bar, "➕ Thêm Tài Khoản", command=lambda: _add_row({}),
                                    bg=COL_BLUE, container_bg=COL_PANEL, font=("Segoe UI", 9, "bold")))
 
@@ -358,3 +393,158 @@ class AccountsMixin:
 
         btn_bar.add(RoundedButton(btn_bar, "💾 Lưu Tất Cả", command=_save_all,
                                    bg=COL_GREEN, container_bg=COL_PANEL, font=("Segoe UI", 9, "bold")))
+
+    # ================= ⚡ LOG NHANH (chọn 1 giả lập + 1 tài khoản, đăng nhập ngay) =================
+    def _open_quick_login_dialog(self):
+        """Popup '⚡ Log Nhanh' - chọn ĐÚNG 1 Giả lập + ĐÚNG 1 Tài khoản rồi
+        đăng nhập NGAY LẬP TỨC (đăng xuất tài khoản cũ trước, nếu có Hoạt
+        Động 'account_logout'), KHÔNG cần mở popup 'Xoay Vòng Tài Khoản'
+        hay tick chọn Hoạt Động/chạy nguyên phiên - dùng khi chỉ cần đổi
+        nhanh/kiểm tra 1 tài khoản trên 1 giả lập cụ thể."""
+        if not getattr(self, "emulators", None):
+            messagebox.showinfo("Chưa có giả lập",
+                                 "Chưa quét được giả lập nào - bấm '🔄 Quét Giả Lập' rồi thử lại.")
+            return
+        accounts = account_manager.load_accounts()
+        if not accounts:
+            messagebox.showinfo("Chưa có Tài khoản",
+                                 "Chưa có Tài khoản nào - vào '👥 Quản Lý Tài Khoản' để thêm trước.")
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("⚡ Log Nhanh")
+        win.configure(bg=COL_PANEL)
+        win.geometry("440x210")
+        win.resizable(False, False)
+        _bind_esc_close(win)
+
+        tk.Label(win, text="Chọn 1 Giả lập + 1 Tài khoản để đăng nhập NGAY (tự đăng xuất tài khoản cũ trước nếu "
+                            "có Hoạt Động 'account_logout', cần có Hoạt Động 'account_login' để hoạt động):",
+                 bg=COL_PANEL, fg=COL_TEXT, font=("Segoe UI", 9, "bold"),
+                 wraplength=400, justify="left").pack(anchor="w", padx=14, pady=(14, 10))
+
+        row1 = tk.Frame(win, bg=COL_PANEL)
+        row1.pack(fill="x", padx=14, pady=4)
+        tk.Label(row1, text="Giả lập:", bg=COL_PANEL, fg=COL_TEXT_MUTED, width=10, anchor="w",
+                 font=("Segoe UI", 9)).pack(side="left")
+        emu_labels = [f"#{e.index} - {e.name}" + ("" if e.running else " (đang tắt)") for e in self.emulators]
+        emu_var = tk.StringVar(value=emu_labels[0] if emu_labels else "")
+        ttk.Combobox(row1, textvariable=emu_var, values=emu_labels, width=32,
+                     state="readonly").pack(side="left", padx=4)
+
+        row2 = tk.Frame(win, bg=COL_PANEL)
+        row2.pack(fill="x", padx=14, pady=4)
+        tk.Label(row2, text="Tài khoản:", bg=COL_PANEL, fg=COL_TEXT_MUTED, width=10, anchor="w",
+                 font=("Segoe UI", 9)).pack(side="left")
+        acc_labels = [(a.get("ten_hien_thi") or a.get("username") or a.get("id")) +
+                      (f"  [{a.get('nhom')}]" if a.get("nhom") else "") for a in accounts]
+        acc_var = tk.StringVar(value=acc_labels[0] if acc_labels else "")
+        ttk.Combobox(row2, textvariable=acc_var, values=acc_labels, width=32,
+                     state="readonly").pack(side="left", padx=4)
+
+        def _confirm():
+            if not emu_var.get() or not acc_var.get():
+                return
+            emulator = self.emulators[emu_labels.index(emu_var.get())]
+            account = accounts[acc_labels.index(acc_var.get())]
+            win.destroy()
+            self._start_quick_login(emulator, account)
+
+        RoundedButton(win, "🔑 Đăng Nhập Ngay", command=_confirm, bg=COL_GREEN, container_bg=COL_PANEL,
+                      font=("Segoe UI", 9, "bold"), padx=16, pady=8).pack(pady=14)
+
+    def _start_quick_login(self, emulator, account):
+        """Kiểm tra giả lập có đang bận không rồi bắt đầu luồng nền Log
+        Nhanh - KHÔNG xếp hàng chờ như phiên CHẠY chính (job Log Nhanh chỉ
+        đăng nhập 1 tài khoản, không đáng để chờ lâu), chỉ báo bận và huỷ
+        nếu giả lập đang có việc khác."""
+        if emulator.index in self._busy_emulator_indexes:
+            messagebox.showwarning("Giả lập đang bận",
+                                    f"Giả lập '{emulator.name}' đang bận (có lịch hẹn giờ hoặc phiên chạy khác) "
+                                    f"- thử lại sau khi giả lập rảnh.")
+            return
+        self._busy_emulator_indexes.add(emulator.index)
+        ten = account.get("ten_hien_thi") or account.get("username") or account.get("id")
+        self._log("info", f"⚡ Log Nhanh: bắt đầu đăng nhập '{ten}' trên '{emulator.name}'...",
+                   emulator_name=emulator.name)
+        threading.Thread(target=self._worker_quick_login, args=(emulator, account), daemon=True).start()
+
+    def _worker_quick_login(self, emulator, account):
+        """Luồng nền của '⚡ Log Nhanh' - tự bật giả lập nếu đang tắt, đăng
+        xuất (nếu có 'account_logout') rồi đăng nhập ĐÚNG 1 tài khoản đã
+        chọn, KHÔNG chạy thêm Hoạt Động nào khác và KHÔNG áp dụng 2 tuỳ
+        chọn hậu kỳ (tắt giả lập / đăng nhập TK chỉ định) - Log Nhanh chỉ
+        làm đúng 1 việc: đổi/kiểm tra nhanh tài khoản đang đăng nhập."""
+        ready_info, _auto_started = self.emu_manager.ensure_running(
+            emulator.index, timeout=120,
+            on_log=lambda lvl, msg, _e=emulator: self._log(lvl, msg, emulator_name=_e.name)
+        )
+        if not ready_info:
+            self.root.after(0, lambda: self._finish_quick_login(emulator.index))
+            return
+        emulator = ready_info  # dùng thông tin MỚI NHẤT (hwnd/serial có thể đổi sau khi vừa bật lại)
+
+        if not self.emu_manager.ensure_adb_connected(emulator):
+            self._log("error", f"Không thấy giả lập trong 'adb devices' (serial: {emulator.adb_serial}) sau khi "
+                                f"khởi động - huỷ Log Nhanh trên giả lập này.", emulator_name=emulator.name)
+            self.root.after(0, lambda: self._finish_quick_login(emulator.index))
+            return
+
+        adb = ADBHelper()
+        adb.device_id = emulator.adb_serial
+        adb.update_resolution()
+        self._log("info", f"Độ phân giải nhận diện: {adb.screen_w}x{adb.screen_h}px", emulator_name=emulator.name)
+
+        wf = WindowFinder(adb)
+        attached = wf.attach_hwnd(emulator.hwnd) if emulator.hwnd else False
+        if not attached:
+            wf.find_ld_windows()
+        if wf.ensure_window_visible():
+            self._log("warn", f"Cửa sổ LDPlayer '{emulator.name}' đang bị THU NHỎ - đã tự khôi phục lại.",
+                       emulator_name=emulator.name)
+            time.sleep(0.5)
+
+        engine = LogicEngine(
+            adb,
+            stop_checker=self._make_stop_checker(),
+            popup_notifier=lambda msg, dur=0, _wf=wf: self._show_ingame_popup(_wf, msg, dur),
+            logger=lambda lvl, msg, _e=emulator: self._log(lvl, msg, emulator_name=_e.name)
+        )
+
+        login_entry = task_registry.find_task(self.tasks, "account_login")
+        logout_entry = task_registry.find_task(self.tasks, "account_logout")
+        if not login_entry:
+            self._log("error", "Chưa có Hoạt Động với id 'account_login' - hãy soạn kịch bản đăng nhập (dùng "
+                                "{tk_user}/{tk_pass} ở bước Gõ Chữ) rồi Đăng Ký Tác Vụ với tên file "
+                                "tasks/account_login.json. Đã huỷ Log Nhanh.", emulator_name=emulator.name)
+            self.root.after(0, lambda: self._finish_quick_login(emulator.index))
+            return
+
+        ten = account.get("ten_hien_thi") or account.get("username") or account.get("id")
+
+        if logout_entry:
+            self._exec_entry(engine, emulator, logout_entry, preset_vars=None, tracked=False)
+            if self.stop_flag:
+                self.root.after(0, lambda: self._finish_quick_login(emulator.index))
+                return
+
+        preset_vars = {"tk_user": account.get("username", ""), "tk_pass": account.get("password", "")}
+        ok = self._exec_entry(engine, emulator, login_entry, preset_vars=preset_vars, tracked=False)
+        if ok:
+            account_manager.mark_run(account_manager.load_accounts(), account.get("id"))
+            self._log("success", f"⚡ Log Nhanh: đã đăng nhập '{ten}' trên '{emulator.name}'.",
+                       emulator_name=emulator.name)
+        else:
+            self._log("error", f"⚡ Log Nhanh: đăng nhập '{ten}' trên '{emulator.name}' THẤT BẠI.",
+                       emulator_name=emulator.name)
+
+        self.root.after(0, lambda: self._finish_quick_login(emulator.index))
+
+    def _finish_quick_login(self, emulator_index):
+        """Dọn trạng thái bận sau khi luồng '_worker_quick_login' kết thúc
+        (thành công/lỗi/bị huỷ đều gọi tới đây) - giải phóng giả lập và lấy
+        tiếp job đang XẾP HÀNG CHỜ cho giả lập đó nếu có (xem
+        _after_emulator_freed ở dashboard_schedule.py), để không làm kẹt
+        hàng chờ của các tính năng khác (CHẠY tay/Xoay Vòng/Hẹn Giờ)."""
+        self._busy_emulator_indexes.discard(emulator_index)
+        self._after_emulator_freed(emulator_index)
