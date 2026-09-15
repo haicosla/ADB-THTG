@@ -16,6 +16,17 @@ def build_capture_step(kind, filename, default_timeout=8, default_conf=0.80):
             "delay": 0.2,
             "comment": f"Nếu thấy [{filename}]"
         }
+    if kind == "wait_vanish":
+        return {
+            "action": "wait_vanish",
+            "template": filename,
+            "timeout": default_timeout,
+            "conf": default_conf,
+            "wait_vanish": True,
+            "repeat": 1,
+            "delay": 0.3,
+            "comment": f"Chờ ảnh biến mất: {filename}"
+        }
     return {
         "action": "wait_image",
         "template": filename,

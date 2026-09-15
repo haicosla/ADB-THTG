@@ -624,14 +624,23 @@ class MacroStudioApp:
         self._image_edit_idx = None
         self._tap_edit_idx = None
         self._swipe_edit_idx = None
-        # Vùng quét (region của wait_image/if_image/multi_image, hoặc box
-        # của ocr_text) của BƯỚC ĐANG ĐƯỢC CHỌN trong danh sách - hiển thị
-        # đè lên Preview (xem render_preview) để dễ hình dung bước đó quét ở
-        # đâu trên màn hình mà không cần mở lại chế độ chọn vùng.
-        self._step_region_overlay = None
+        # Vùng quét/điểm chạm/đường vuốt của BƯỚC ĐANG ĐƯỢC CHỌN trong danh
+        # sách - hiển thị đè lên Preview (xem render_preview) để dễ hình
+        # dung bước đó tác động ở đâu trên màn hình mà không cần mở lại chế
+        # độ chọn vùng/tọa độ. Dạng: {"type": "region"|"point"|"swipe", ...}
+        # - "region": {"type": "region", "box": [x1,y1,x2,y2]} (tỉ lệ 0..1)
+        # - "point":  {"type": "point", "pos": [x,y]} (tỉ lệ 0..1) - bước Tap
+        # - "swipe":  {"type": "swipe", "from": [x,y], "to": [x,y]}
+        self._step_action_overlay = None
 
         self.is_playing = False
         self.stop_flag = False
+        # Danh sách bước ĐANG CHẠY thật sự (toàn bộ self.steps khi bấm
+        # "CHẠY THỬ", hoặc chỉ các bước đang bôi đen khi bấm "Chạy Đã
+        # Chọn") + hàm step_notifier gốc để khôi phục lại sau khi chạy
+        # xong 1 lượt "Chạy Đã Chọn" (xem run_selected_steps()).
+        self._active_run_steps = None
+        self._default_step_notifier = None
 
         os.makedirs("templates", exist_ok=True)
         os.makedirs("tasks", exist_ok=True)
@@ -670,6 +679,11 @@ class MacroStudioApp:
             popup_notifier=self._show_ingame_popup,
             logger=self._log_run
         )
+        # Lưu lại notifier "mặc định" (đánh dấu đúng theo index trong TOÀN
+        # BỘ self.steps) để có thể khôi phục sau khi "Chạy Đã Chọn" tạm đổi
+        # sang notifier ánh xạ index-trong-tập-con -> index-thật (xem
+        # run_selected_steps()).
+        self._default_step_notifier = self.engine.step_notifier
 
         self.stream_thread = threading.Thread(target=self._stream_capture_worker, daemon=True)
         self.stream_thread.start()
@@ -1004,6 +1018,10 @@ class MacroStudioApp:
         self.btn_run.pack(side="right", padx=4)
         self.btn_stop = ttk.Button(f_bot, text="⏹ DỪNG (F8)", state="disabled", command=self.stop_macro)
         self.btn_stop.pack(side="right", padx=4)
+        # Chạy CHỈ những bước đang được bôi đen (chọn) trong danh sách -
+        # tiện để thử lại nhanh 1-vài bước mà không cần chạy lại từ đầu.
+        self.btn_run_selected = ttk.Button(f_bot, text="▶ Chạy Đã Chọn", command=self.run_selected_steps)
+        self.btn_run_selected.pack(side="right", padx=4)
 
         self.tree.bind("<Control-a>", self.select_all_steps)
 
@@ -1888,21 +1906,26 @@ class MacroStudioApp:
 
     def _update_region_overlay(self, step):
         """Cập nhật vùng quét (region của wait_image/if_image/multi_image,
-        hoặc box của ocr_text) cần vẽ đè lên Preview theo BƯỚC ĐANG ĐƯỢC
-        CHỌN trong danh sách - giúp nhìn ngay bước đó quét ở đâu trên màn
-        hình mà không cần mở lại chế độ chọn vùng. Vẽ lại Preview ngay (nếu
-        đang có sẵn 1 khung hình) để thấy hiệu lực tức thì kể cả khi KHÔNG
-        bật Xem Trực Tiếp."""
-        region_norm = None
+        box của ocr_text), ĐIỂM CHẠM (pos của bước Tap) hoặc ĐƯỜNG VUỐT
+        (from/to của bước Swipe) cần vẽ đè lên Preview theo BƯỚC ĐANG ĐƯỢC
+        CHỌN trong danh sách - giúp nhìn ngay bước đó tác động ở đâu trên
+        màn hình mà không cần mở lại chế độ chọn vùng/tọa độ. Vẽ lại
+        Preview ngay (nếu đang có sẵn 1 khung hình) để thấy hiệu lực tức
+        thì kể cả khi KHÔNG bật Xem Trực Tiếp."""
+        overlay = None
         if step:
             act = step.get("action")
             if act in ("wait_image", "if_image", "multi_image") and step.get("region"):
-                region_norm = step.get("region")
+                overlay = {"type": "region", "box": step.get("region")}
             elif act == "ocr_text" and step.get("box"):
-                region_norm = step.get("box")
-        if region_norm == self._step_region_overlay:
+                overlay = {"type": "region", "box": step.get("box")}
+            elif act == "tap" and step.get("pos"):
+                overlay = {"type": "point", "pos": step.get("pos")}
+            elif act == "swipe" and step.get("from") and step.get("to"):
+                overlay = {"type": "swipe", "from": step.get("from"), "to": step.get("to")}
+        if overlay == self._step_action_overlay:
             return
-        self._step_region_overlay = region_norm
+        self._step_action_overlay = overlay
         if self.current_screen_cv is not None and not self.is_streaming_active:
             self.render_preview(self.current_screen_cv)
 
@@ -2345,16 +2368,35 @@ class MacroStudioApp:
             bx1, by1, bx2, by2 = highlight_box
             cv2.rectangle(resized, (int(bx1 * self.preview_scale), int(by1 * self.preview_scale)), (int(bx2 * self.preview_scale), int(by2 * self.preview_scale)), (0, 255, 0), 2)
 
-        # Vẽ đè VÙNG QUÉT (region/box) của bước ĐANG ĐƯỢC CHỌN trong danh
-        # sách (nếu có) - xem _update_region_overlay(). Toạ độ lưu theo tỉ
-        # lệ 0..1 trên TOÀN màn hình gốc nên nhân thẳng với preview_w/h hiện
-        # tại (không nhân với w/h gốc) là ra đúng vị trí trên canvas.
-        if getattr(self, "_step_region_overlay", None):
-            ox1, oy1, ox2, oy2 = self._step_region_overlay
+        # Vẽ đè VÙNG QUÉT / ĐIỂM CHẠM / ĐƯỜNG VUỐT của bước ĐANG ĐƯỢC CHỌN
+        # trong danh sách (nếu có) - xem _update_region_overlay(). Toạ độ
+        # lưu theo tỉ lệ 0..1 trên TOÀN màn hình gốc nên nhân thẳng với
+        # preview_w/h hiện tại (không nhân với w/h gốc) là ra đúng vị trí
+        # trên canvas.
+        overlay = getattr(self, "_step_action_overlay", None)
+        if overlay and overlay.get("type") == "region":
+            ox1, oy1, ox2, oy2 = overlay["box"]
             px1, py1 = int(ox1 * self.preview_w), int(oy1 * self.preview_h)
             px2, py2 = int(ox2 * self.preview_w), int(oy2 * self.preview_h)
             cv2.rectangle(resized, (px1, py1), (px2, py2), (255, 190, 0), 2)
             cv2.putText(resized, "Vùng quét", (px1 + 3, max(12, py1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 190, 0), 1, cv2.LINE_AA)
+        elif overlay and overlay.get("type") == "point":
+            ox, oy = overlay["pos"]
+            px, py = int(ox * self.preview_w), int(oy * self.preview_h)
+            # Chấm tròn + dấu cộng để dễ thấy điểm Tap sẽ bấm vào đâu.
+            cv2.circle(resized, (px, py), 10, (0, 140, 255), 2)
+            cv2.circle(resized, (px, py), 2, (0, 140, 255), -1)
+            cv2.line(resized, (px - 14, py), (px + 14, py), (0, 140, 255), 1)
+            cv2.line(resized, (px, py - 14), (px, py + 14), (0, 140, 255), 1)
+            cv2.putText(resized, "Tap", (px + 12, max(12, py - 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 140, 255), 1, cv2.LINE_AA)
+        elif overlay and overlay.get("type") == "swipe":
+            fx, fy = overlay["from"]
+            tx, ty = overlay["to"]
+            pfx, pfy = int(fx * self.preview_w), int(fy * self.preview_h)
+            ptx, pty = int(tx * self.preview_w), int(ty * self.preview_h)
+            cv2.arrowedLine(resized, (pfx, pfy), (ptx, pty), (186, 0, 255), 2, tipLength=0.15)
+            cv2.circle(resized, (pfx, pfy), 6, (186, 0, 255), 2)
+            cv2.putText(resized, "Vuốt", (pfx + 8, max(12, pfy - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (186, 0, 255), 1, cv2.LINE_AA)
 
         rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
         self.tk_img = ImageTk.PhotoImage(Image.fromarray(rgb))
@@ -2967,16 +3009,69 @@ class MacroStudioApp:
         if not self.steps:
             messagebox.showwarning("Lưu ý", "Chưa có bước nào!")
             return
+        self._start_run(self.steps, f"══════ Bắt đầu chạy kịch bản ({len(self.steps)} bước) ══════")
+
+    def _selected_steps_in_order(self):
+        """Trả về (indices, steps) của các dòng đang được BÔI ĐEN trong
+        danh sách, sắp theo đúng thứ tự xuất hiện trong self.steps (bôi đen
+        bằng Shift/Ctrl+Click có thể trả về thứ tự bất kỳ)."""
+        try:
+            indices = sorted(int(iid) for iid in self.tree.selection())
+        except ValueError:
+            indices = []
+        return indices, [self.steps[i] for i in indices]
+
+    def run_selected_steps(self):
+        indices, selected_steps = self._selected_steps_in_order()
+        if not selected_steps:
+            messagebox.showwarning("Lưu ý", "Chưa chọn bước nào trong danh sách để chạy!\n"
+                                             "(Bôi đen 1 hoặc nhiều bước rồi bấm lại)")
+            return
+
+        # Cảnh báo nhẹ nếu chọn thiếu 1 nửa của khối IF/Nhóm - chạy 1 khối
+        # không trọn vẹn (vd chỉ chọn IF mà không chọn ENDIF, hoặc ngược
+        # lại) có thể khiến logic không hoạt động đúng như khi chạy toàn bộ.
+        counts = {"if": 0, "endif": 0, "group_start": 0, "group_end": 0}
+        for s in selected_steps:
+            act = s.get("action")
+            if act in ("if_image", "if_var"):
+                counts["if"] += 1
+            elif act == "endif":
+                counts["endif"] += 1
+            elif act == "group_start":
+                counts["group_start"] += 1
+            elif act == "group_end":
+                counts["group_end"] += 1
+        if counts["if"] != counts["endif"] or counts["group_start"] != counts["group_end"]:
+            if not messagebox.askyesno(
+                "Cảnh báo",
+                "Các bước đã chọn có vẻ chứa khối IF/Nhóm KHÔNG TRỌN VẸN "
+                "(thiếu ENDIF hoặc điểm kết thúc Nhóm tương ứng).\n"
+                "Logic điều kiện/lặp có thể chạy không đúng như mong đợi.\n\n"
+                "Vẫn chạy các bước đã chọn?"
+            ):
+                return
+
+        # Đổi tạm step_notifier để đánh dấu ĐÚNG dòng thật trong self.steps
+        # (engine chỉ biết index trong tập con selected_steps đang chạy).
+        self.engine.step_notifier = lambda sub_idx: self.root.after(
+            0, lambda: self.tree.selection_set(str(indices[sub_idx])) if sub_idx < len(indices) else None
+        )
+        self._start_run(selected_steps, f"══════ Bắt đầu chạy {len(selected_steps)} bước ĐÃ CHỌN ══════")
+
+    def _start_run(self, steps_to_run, log_header):
         if self.is_streaming_active:
             self.is_streaming_active = False
             self.btn_toggle_stream.config(text="▶ LIVE", bg="#455A64")
             self.lbl_fps.config(text="FPS: OFF", foreground="gray")
             time.sleep(0.1)
+        self._active_run_steps = steps_to_run
         self.is_playing = True
         self.stop_flag = False
         self.btn_run.config(state="disabled")
+        self.btn_run_selected.config(state="disabled")
         self.btn_stop.config(state="normal")
-        self._append_log_line("info", f"══════ Bắt đầu chạy kịch bản ({len(self.steps)} bước) ══════")
+        self._append_log_line("info", log_header)
         threading.Thread(target=self._worker_run, daemon=True).start()
 
     def stop_macro(self):
@@ -3042,7 +3137,7 @@ class MacroStudioApp:
         error_msg = None
         self.engine.reset_variables()
         try:
-            self.engine.execute_steps(self.steps, is_root=True)
+            self.engine.execute_steps(self._active_run_steps or self.steps, is_root=True)
         except (BreakGroupSignal, ContinueGroupSignal):
             pass
         except Exception as e:
@@ -3051,7 +3146,14 @@ class MacroStudioApp:
 
     def _on_finish_run(self, error_msg=None):
         self.is_playing = False
+        self._active_run_steps = None
+        # Nếu vừa "Chạy Đã Chọn" đã đổi tạm step_notifier -> trả về notifier
+        # mặc định (đánh dấu theo index trong TOÀN BỘ self.steps) để lần
+        # "CHẠY THỬ" toàn bộ tiếp theo đánh dấu đúng dòng như bình thường.
+        if self._default_step_notifier is not None:
+            self.engine.step_notifier = self._default_step_notifier
         self.btn_run.config(state="normal")
+        self.btn_run_selected.config(state="normal")
         self.btn_stop.config(state="disabled")
         if not self.is_streaming_active:
             self.capture_and_show()

@@ -15,14 +15,18 @@ except ImportError:
 
 
 def _project_root_dir():
-    """Thư mục CHA (1 cấp trên) của thư mục chứa file .py này (nơi main.py và
-    các module khác đang nằm) - dùng làm nơi ƯU TIÊN dò sẵn adb.exe /
-    tesseract.exe nếu người dùng mang theo bản portable đóng gói CÙNG dự án
-    (đặt cạnh thư mục mã nguồn), thay vì chỉ trông chờ vào việc cài đặt hệ
-    thống hoặc các đường dẫn ổ đĩa cố định (vd C:\\leidian...) vốn không đúng
-    trên mọi máy (xem PROJECT_CONTEXT.md - máy này cài LDPlayer ở H:\\)."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.dirname(here)
+    """Thư mục chứa file .py này (nơi main.py và các module khác đang nằm,
+    cũng LÀ nơi platform-tools/ và Tesseract-OCR/ được đặt CÙNG CẤP khi
+    đóng gói dự án dạng portable) - dùng làm nơi ƯU TIÊN dò sẵn adb.exe /
+    tesseract.exe, thay vì chỉ trông chờ vào việc cài đặt hệ thống hoặc các
+    đường dẫn ổ đĩa cố định (vd C:\\leidian...) vốn không đúng trên mọi máy.
+
+    TRƯỚC ĐÂY hàm này trả về thư mục CHA của thư mục dự án (đi lên thêm 1
+    cấp nữa ngoài ý muốn) -> không bao giờ tìm thấy platform-tools/
+    Tesseract-OCR nằm NGAY TRONG thư mục dự án khi copy nguyên bộ sang máy
+    khác (chỉ "chạy được" trên máy cũ nhờ tình cờ LDPlayer đang mở sẵn hoặc
+    adb có trong PATH hệ thống, che giấu mất lỗi này)."""
+    return os.path.dirname(os.path.abspath(__file__))
 
 
 # Các đường dẫn cài đặt Tesseract-OCR phổ biến trên Windows - thử lần lượt
@@ -438,6 +442,44 @@ class ADBHelper:
                 best_pos = (round(cx / self.screen_w, 4), round(cy / self.screen_h, 4))
 
         return best_name, best_pos, highest_score
+
+    def find_all_images_on_screen(self, templates_dict, threshold=0.80, region=None):
+        """Logic AND: kiểm tra TẤT CẢ ảnh trong templates_dict có xuất hiện
+        ĐỒNG THỜI trên CÙNG 1 tấm ảnh chụp màn hình hay không - khác với
+        find_any_image_on_screen() (logic OR) là chỉ cần 1 trong số đó xuất
+        hiện là đã tính khớp. Dùng cho if_image/multi_image khi người dùng
+        chọn chế độ "khớp TẤT CẢ ảnh trong nhóm" (match_mode="and"), vd chỉ
+        coi là ĐÚNG khi cả icon A và icon B cùng hiện trên màn hình.
+
+        Trả về (all_matched: bool, results: dict[tên_file] -> (pos, score))
+        - results chỉ chứa những ảnh ĐÃ tìm thấy (kể cả khi chưa đủ TẤT CẢ),
+        hữu ích để log/debug xem còn thiếu ảnh nào."""
+        screen = self.screencap_fast()
+        if screen is None or not templates_dict:
+            return False, {}
+
+        search_img, off_x, off_y = self._crop_region(screen, region)
+        s_gray = self._to_gray(search_img)
+
+        results = {}
+        for name, t_cv in templates_dict.items():
+            if t_cv is None:
+                continue
+            t_gray = self._to_gray(t_cv)
+            if s_gray.shape[0] < t_gray.shape[0] or s_gray.shape[1] < t_gray.shape[1]:
+                continue
+
+            res = cv2.matchTemplate(s_gray, t_gray, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(res)
+
+            if max_val >= threshold:
+                h, w = t_gray.shape[:2]
+                cx = off_x + max_loc[0] + w // 2
+                cy = off_y + max_loc[1] + h // 2
+                results[name] = ((round(cx / self.screen_w, 4), round(cy / self.screen_h, 4)), max_val)
+
+        all_matched = len(results) == len(templates_dict)
+        return all_matched, results
 
     # ---- BÀN PHÍM (mới) ----
     @staticmethod

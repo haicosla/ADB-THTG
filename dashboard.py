@@ -39,6 +39,17 @@ kịch bản, và được chính Dashboard này gọi tới khi bấm "➕ Tạ
 """
 import os
 import json
+
+# QUAN TRỌNG: Dashboard là 1 TIẾN TRÌNH RIÊNG với LD Macro Studio (main.py),
+# có "if __name__ == '__main__'" của chính nó - bản vá os.chdir ở main.py
+# KHÔNG áp dụng cho tiến trình này. Toàn bộ đường dẫn dùng trong Dashboard
+# (accounts.json, task_registry.json, dashboard_settings.json, schedules.json,
+# tasks/, groups/...) đều là đường dẫn TƯƠNG ĐỐI, phụ thuộc thư mục làm việc
+# hiện tại lúc chạy - ép cwd về đúng thư mục chứa dashboard.py ngay từ đầu để
+# không bị lệch dù chạy bằng shortcut/.bat có "Start in" khác, hay trên máy
+# nào khác, giống hệt lý do đã sửa ở main.py.
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 import tkinter as tk
 
 from emulator_manager import EmulatorManager
