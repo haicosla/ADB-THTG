@@ -5,6 +5,8 @@ import re
 import cv2
 import numpy as np
 
+import data_groups
+
 
 class BreakGroupSignal(Exception):
     """Dùng nội bộ để thoát ngay khỏi vòng lặp của khối GROUP hiện tại khi
@@ -490,6 +492,38 @@ class LogicEngine:
                         self._log("info", f"Popup: \"{message}\"")
                         if self.popup_notifier:
                             self.popup_notifier(message, duration)
+
+                    elif act == "next_data_item":
+                        # Lấy PHẦN TỬ TIẾP THEO trong 1 "Nhóm Dữ Liệu" (xem
+                        # data_groups.py) và gán vào 1 biến - dùng để LẶP qua
+                        # 1 danh sách text tuỳ ý (vd id tài khoản 1..10) mỗi
+                        # khi đặt bước này ở ĐẦU 1 khối GROUP lặp N lần, giống
+                        # hệt cơ chế xoay tài khoản nhưng dùng được cho MỌI
+                        # danh sách, không chỉ riêng login/logout.
+                        group_id = s.get("group_id", "")
+                        var_name = s.get("var", "")
+                        wrap = bool(s.get("wrap", True))
+                        cursor_key = f"__cursor_{group_id}"
+                        if not group_id or not var_name:
+                            self._log("error", "Bước Lấy Dữ Liệu (Nhóm) chưa chọn Nhóm Dữ Liệu hoặc chưa đặt tên biến")
+                        else:
+                            entries = data_groups.load_groups()
+                            group = data_groups.get_group(entries, group_id)
+                            items = (group or {}).get("items", [])
+                            if not items:
+                                self._log("error", f"Nhóm Dữ Liệu '{(group or {}).get('ten', group_id)}' rỗng hoặc không tồn tại")
+                            else:
+                                cursor = int(self.variables.get(cursor_key, 0))
+                                if cursor >= len(items):
+                                    if wrap:
+                                        cursor = 0
+                                    else:
+                                        cursor = len(items) - 1
+                                value = items[cursor]
+                                self.variables[var_name] = value
+                                group_name = group.get("ten", group_id)
+                                self._log("info", f"Nhóm Dữ Liệu '{group_name}': lấy phần tử {cursor + 1}/{len(items)} -> biến {var_name} = \"{value}\"")
+                                self.variables[cursor_key] = cursor + 1
 
                     elif act == "continue_group":
                         # Bỏ qua các bước còn lại trong lượt lặp NHÓM hiện tại,

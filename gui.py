@@ -17,6 +17,7 @@ from recorder import LiveRecorder, parse_key_combo_text
 from step_list_controls import StepListController
 import capture_tools
 import task_registry
+import data_groups
 
 
 def _bind_esc_close(win):
@@ -296,6 +297,193 @@ class IfVarDialog(tk.Toplevel):
             val = val_raw
 
         self.result = {"var": var_name, "op": op, "value": val}
+        self.destroy()
+
+
+class DataGroupManagerDialog(tk.Toplevel):
+    """Cửa sổ quản lý các NHÓM DỮ LIỆU (data_groups.json): tạo/sửa/xoá danh
+    sách text tuỳ ý (vd id tài khoản 1..10) dùng làm biến lặp trong kịch
+    bản (xem bước "➡️ Lấy Dữ Liệu (Nhóm)" - action next_data_item)."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("🗂️ Quản Lý Nhóm Dữ Liệu")
+        self.geometry("640x420")
+        self.transient(parent)
+        self.grab_set()
+        _bind_esc_close(self)
+
+        self.entries = data_groups.load_groups()
+        self.current_id = None
+
+        f_main = ttk.Frame(self)
+        f_main.pack(fill="both", expand=True, padx=10, pady=10)
+
+        f_left = ttk.Frame(f_main)
+        f_left.pack(side="left", fill="y", padx=(0, 10))
+        ttk.Label(f_left, text="Các Nhóm Dữ Liệu:", font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        self.lst = tk.Listbox(f_left, width=26, height=18, exportselection=False)
+        self.lst.pack(fill="y", expand=True, pady=4)
+        self.lst.bind("<<ListboxSelect>>", self._on_select)
+
+        f_left_btn = ttk.Frame(f_left)
+        f_left_btn.pack(fill="x", pady=2)
+        ttk.Button(f_left_btn, text="➕ Mới", command=self._on_new).pack(side="left", padx=2)
+        ttk.Button(f_left_btn, text="🗑️ Xoá", command=self._on_delete).pack(side="left", padx=2)
+
+        f_right = ttk.Frame(f_main)
+        f_right.pack(side="left", fill="both", expand=True)
+        ttk.Label(f_right, text="Tên nhóm:").pack(anchor="w")
+        self.txt_name = ttk.Entry(f_right)
+        self.txt_name.pack(fill="x", pady=(0, 8))
+
+        ttk.Label(f_right, text="Danh sách phần tử (MỖI DÒNG 1 giá trị,\nthứ tự trên xuống = thứ tự lặp):").pack(anchor="w")
+        f_items = ttk.Frame(f_right)
+        f_items.pack(fill="both", expand=True, pady=4)
+        self.txt_items = tk.Text(f_items, width=40, height=14, wrap="none")
+        sb = ttk.Scrollbar(f_items, command=self.txt_items.yview)
+        self.txt_items.configure(yscrollcommand=sb.set)
+        self.txt_items.pack(side="left", fill="both", expand=True)
+        sb.pack(side="left", fill="y")
+
+        ttk.Button(f_right, text="💾 Lưu Nhóm Này", command=self._on_save).pack(anchor="e", pady=8)
+
+        self._refresh_list()
+
+    def _refresh_list(self, select_id=None):
+        self.lst.delete(0, tk.END)
+        for e in self.entries:
+            n_items = len(e.get("items", []))
+            self.lst.insert(tk.END, f"{e.get('ten', '(chưa đặt tên)')}  ({n_items})")
+        if select_id:
+            for i, e in enumerate(self.entries):
+                if e.get("id") == select_id:
+                    self.lst.selection_set(i)
+                    self._load_entry(e)
+                    break
+
+    def _on_select(self, event=None):
+        sel = self.lst.curselection()
+        if not sel:
+            return
+        self._load_entry(self.entries[sel[0]])
+
+    def _load_entry(self, e):
+        self.current_id = e.get("id")
+        self.txt_name.delete(0, tk.END)
+        self.txt_name.insert(0, e.get("ten", ""))
+        self.txt_items.delete("1.0", tk.END)
+        self.txt_items.insert("1.0", data_groups.items_to_text(e.get("items", [])))
+
+    def _on_new(self):
+        self.current_id = None
+        self.txt_name.delete(0, tk.END)
+        self.txt_items.delete("1.0", tk.END)
+        self.lst.selection_clear(0, tk.END)
+        self.txt_name.focus_set()
+
+    def _on_save(self):
+        name = self.txt_name.get().strip()
+        if not name:
+            messagebox.showerror("Lỗi", "Chưa nhập tên Nhóm Dữ Liệu!", parent=self)
+            return
+        items = data_groups.items_from_text(self.txt_items.get("1.0", tk.END))
+        if not items:
+            messagebox.showerror("Lỗi", "Danh sách phần tử đang rỗng - mỗi dòng nhập 1 giá trị!", parent=self)
+            return
+        gid = self.current_id or data_groups.new_group_id()
+        entry = {"id": gid, "ten": name, "items": items}
+        data_groups.upsert_group(self.entries, entry)
+        data_groups.save_groups(self.entries)
+        self._refresh_list(select_id=gid)
+        messagebox.showinfo("Đã lưu", f"Đã lưu Nhóm Dữ Liệu '{name}' ({len(items)} phần tử).", parent=self)
+
+    def _on_delete(self):
+        sel = self.lst.curselection()
+        if not sel:
+            return
+        e = self.entries[sel[0]]
+        if not messagebox.askyesno("Xác nhận", f"Xoá Nhóm Dữ Liệu '{e.get('ten')}'?", parent=self):
+            return
+        self.entries = data_groups.remove_group(self.entries, e.get("id"))
+        data_groups.save_groups(self.entries)
+        self._on_new()
+        self._refresh_list()
+
+
+class NextDataItemDialog(tk.Toplevel):
+    """Cấu hình bước "➡️ Lấy Dữ Liệu (Nhóm)" (action next_data_item): chọn 1
+    Nhóm Dữ Liệu đã tạo sẵn (xem DataGroupManagerDialog), đặt tên biến sẽ
+    nhận giá trị, và có lặp lại từ đầu khi hết danh sách hay không."""
+
+    def __init__(self, parent, existing_vars=None, initial_var="id"):
+        super().__init__(parent)
+        self.title("Lấy Dữ Liệu Từ Nhóm")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        self.result = None
+        self.groups = data_groups.load_groups()
+        existing_vars = existing_vars or [initial_var]
+        pad = {"padx": 10, "pady": 5}
+
+        if not self.groups:
+            ttk.Label(
+                self, text="Chưa có Nhóm Dữ Liệu nào.\nHãy bấm '🗂️ Nhóm Dữ Liệu' để tạo trước.",
+                foreground="red", justify="left"
+            ).grid(row=0, column=0, columnspan=2, padx=10, pady=10)
+            ttk.Button(self, text="Đóng", command=self.destroy).grid(row=1, column=0, columnspan=2, pady=10)
+            self.geometry(f"+{parent.winfo_rootx() + 150}+{parent.winfo_rooty() + 120}")
+            return
+
+        names = [f"{g.get('ten')} ({len(g.get('items', []))})" for g in self.groups]
+
+        ttk.Label(self, text="Nhóm Dữ Liệu:").grid(row=0, column=0, sticky="w", **pad)
+        self.cbo_group = ttk.Combobox(self, values=names, state="readonly", width=30)
+        self.cbo_group.current(0)
+        self.cbo_group.grid(row=0, column=1, sticky="w", **pad)
+
+        ttk.Label(self, text="Gán vào biến:").grid(row=1, column=0, sticky="w", **pad)
+        self.cbo_var = ttk.Combobox(self, values=existing_vars, width=18)
+        self.cbo_var.set(initial_var)
+        self.cbo_var.grid(row=1, column=1, sticky="w", **pad)
+
+        self.var_wrap = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            self, text="Hết danh sách thì quay lại từ đầu (wrap)", variable=self.var_wrap
+        ).grid(row=2, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 5))
+
+        ttk.Label(
+            self,
+            text="Mẹo: đặt bước này ở ĐẦU 1 khối GROUP lặp N lần\n"
+                 "(N = số phần tử) để mỗi lượt lặp tự đổi sang giá trị tiếp theo.",
+            foreground="#555", justify="left"
+        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
+
+        f_btn = ttk.Frame(self)
+        f_btn.grid(row=4, column=0, columnspan=2, pady=8)
+        ttk.Button(f_btn, text="✔ Xác Nhận", command=self._on_confirm).pack(side="left", padx=6)
+        ttk.Button(f_btn, text="✖ Hủy", command=self.destroy).pack(side="left", padx=6)
+
+        self.bind("<Return>", lambda e: self._on_confirm())
+        self.geometry(f"+{parent.winfo_rootx() + 150}+{parent.winfo_rooty() + 120}")
+
+    def _on_confirm(self):
+        idx = self.cbo_group.current()
+        if idx < 0:
+            return
+        group = self.groups[idx]
+        var_name = self.cbo_var.get().strip()
+        if not var_name:
+            messagebox.showerror("Lỗi", "Chưa nhập tên biến!", parent=self)
+            return
+        self.result = {
+            "group_id": group.get("id"),
+            "group_name": group.get("ten"),
+            "var": var_name,
+            "wrap": bool(self.var_wrap.get()),
+        }
         self.destroy()
 
 
@@ -665,6 +853,8 @@ class MacroStudioApp:
         ttk.Button(f_vars_sub, text="🔢 Đặt Biến", command=self.add_manual_set_var).pack(side="left", padx=2)
         ttk.Button(f_vars_sub, text="🔢 Tăng/Giảm Biến", command=self.add_manual_inc_var).pack(side="left", padx=2)
         ttk.Button(f_vars_sub, text="🔀 IF (Biến)", command=self.add_if_var).pack(side="left", padx=2)
+        ttk.Button(f_vars_sub, text="🗂️ Nhóm Dữ Liệu", command=self.open_data_group_manager).pack(side="left", padx=2)
+        ttk.Button(f_vars_sub, text="➡️ Lấy Dữ Liệu (Nhóm)", command=self.add_manual_next_data_item).pack(side="left", padx=2)
         ttk.Button(f_vars_sub, text="🔁 Lặp Lại (Continue)", command=self.add_continue_group).pack(side="left", padx=2)
         ttk.Button(f_vars_sub, text="⛔ Dừng Vòng Lặp Nhóm", command=self.add_break_group).pack(side="left", padx=2)
 
@@ -1424,6 +1614,28 @@ class MacroStudioApp:
         }
         self._insert_step(step)
 
+    def open_data_group_manager(self):
+        """Mở cửa sổ quản lý Nhóm Dữ Liệu (tạo/sửa/xoá danh sách text tuỳ ý
+        dùng làm biến lặp trong kịch bản)."""
+        DataGroupManagerDialog(self.root)
+
+    def add_manual_next_data_item(self):
+        existing = self._get_existing_variable_names()
+        dlg = NextDataItemDialog(self.root, existing_vars=existing)
+        self.root.wait_window(dlg)
+        if not dlg.result:
+            return
+        res = dlg.result
+        self._insert_step({
+            "action": "next_data_item",
+            "group_id": res["group_id"],
+            "var": res["var"],
+            "wrap": res["wrap"],
+            "repeat": 1,
+            "delay": 0.1,
+            "comment": f"Lấy dữ liệu từ Nhóm '{res['group_name']}' -> biến {res['var']}"
+        })
+
     def add_break_group(self):
         self._insert_step({"action": "break_group", "repeat": 1, "delay": 0.1, "comment": "Dừng vòng lặp Nhóm"})
 
@@ -2088,6 +2300,9 @@ class MacroStudioApp:
             elif act == "ocr_text":
                 detail = f"{indent_str}├── 🔤 OCR vùng -> biến {s.get('var', '?')}"
                 tag = "tag_key"
+            elif act == "next_data_item":
+                detail = f"{indent_str}├── 🗂️ Lấy dữ liệu ({s.get('comment', '')}) -> biến {s.get('var', '?')}"
+                tag = "tag_var"
             elif act == "show_popup":
                 detail = f"{indent_str}├── 📢 Popup: \"{s.get('message', '')}\""
                 tag = "tag_key"

@@ -27,20 +27,24 @@ class EmulatorMixin:
         giả lập đang chạy) - để người dùng vẫn tick chọn và bấm '🟢 Bật Đã
         Chọn' được ngay cả khi chưa mở sẵn giả lập nào."""
         self.emulators = self.emu_manager.list_configured()
-        for w in self.emu_chip_frame.winfo_children():
-            w.destroy()
+        # emu_chip_frame giờ là FlowBar (tự xuống dòng, xem dashboard_ui.py)
+        # - dùng .clear() thay vì tự lặp winfo_children() để destroy(), để
+        # FlowBar dọn đúng cả danh sách nội bộ _widgets của nó (không thì
+        # lần _reflow() kế tiếp vẫn cố định vị các widget đã bị destroy()).
+        self.emu_chip_frame.clear()
         self.emu_vars = {}
 
         if not self.emulators:
-            tk.Label(self.emu_chip_frame,
-                     text="Không tìm thấy giả lập nào. Kiểm tra đường dẫn ldconsole.exe "
-                          "(bấm '📁 Chọn ldconsole.exe') rồi bấm '🔄 Quét Giả Lập' lại.",
-                     bg=COL_PANEL, fg=COL_TEXT_MUTED, font=("Segoe UI", 9)).pack(side="left", padx=6)
+            self.emu_chip_frame.add(tk.Label(
+                self.emu_chip_frame,
+                text="Không tìm thấy giả lập nào. Kiểm tra đường dẫn ldconsole.exe "
+                     "(bấm '📁 Chọn ldconsole.exe') rồi bấm '🔄 Quét Giả Lập' lại.",
+                bg=COL_PANEL, fg=COL_TEXT_MUTED, font=("Segoe UI", 9)))
             self._refresh_log_filter_options()
             return
 
-        DarkCheck(self.emu_chip_frame, "Tất cả giả lập", self.emu_all_var, bg=COL_PANEL,
-                  command=self._on_toggle_all_emulators).pack(side="left", padx=8)
+        self.emu_chip_frame.add(DarkCheck(self.emu_chip_frame, "Tất cả giả lập", self.emu_all_var, bg=COL_PANEL,
+                                           command=self._on_toggle_all_emulators))
 
         for e in self.emulators:
             # Mặc định KHÔNG tự tick giả lập đang TẮT dù "Tất cả giả lập"
@@ -52,7 +56,7 @@ class EmulatorMixin:
             self.emu_vars[e.name] = var
             label = f"🟢 {e.name}" if e.running else f"⚪ {e.name} (đang tắt)"
             fg = COL_TEXT if e.running else COL_TEXT_MUTED
-            DarkCheck(self.emu_chip_frame, label, var, bg=COL_PANEL, fg=fg).pack(side="left", padx=6)
+            self.emu_chip_frame.add(DarkCheck(self.emu_chip_frame, label, var, bg=COL_PANEL, fg=fg))
 
         if not self.emu_manager.has_ldconsole():
             self._log("warn", "Không tìm thấy ldconsole.exe - chỉ hiển thị được serial ADB, không có tên "

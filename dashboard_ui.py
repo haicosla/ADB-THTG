@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from dashboard_theme import *
-from dashboard_widgets import RoundedButton, DarkCheck
+from dashboard_widgets import RoundedButton, DarkCheck, FlowBar
 
 
 class UIBuildMixin:
@@ -37,41 +37,59 @@ class UIBuildMixin:
         )
         self.btn_create_activity.pack(side="right", padx=4)
 
-        actions_bar = tk.Frame(self.root, bg=COL_BG)
+        # FlowBar (thay vì Frame thường + pack(side="left")) để hàng nút TỰ
+        # XUỐNG DÒNG khi thu nhỏ cửa sổ, thay vì bị Tkinter âm thầm cắt/giấu
+        # mất những nút không còn đủ chỗ (xem docstring FlowBar ở
+        # dashboard_widgets.py).
+        actions_bar = FlowBar(self.root, bg=COL_BG)
         actions_bar.pack(fill="x", padx=10, pady=(0, 8))
 
-        RoundedButton(actions_bar, "📱 Mở Bảng Giả Lập", command=lambda: self._quick_action("mo_bang_gia_lap"),
-                      bg=COL_BLUE, container_bg=COL_BG, font=("Segoe UI", 9, "bold")).pack(side="left", padx=3)
-        RoundedButton(actions_bar, "🆕 Setup Người Mới", command=lambda: self._quick_action("setup_nguoi_moi"),
-                      bg=COL_ORANGE, container_bg=COL_BG, font=("Segoe UI", 9, "bold")).pack(side="left", padx=3)
-        RoundedButton(actions_bar, "📖 Hướng Dẫn", command=lambda: self._quick_action("huong_dan"),
-                      bg=COL_PURPLE, container_bg=COL_BG, font=("Segoe UI", 9, "bold")).pack(side="left", padx=3)
+        actions_bar.add(RoundedButton(actions_bar, "📱 Mở Bảng Giả Lập", command=lambda: self._quick_action("mo_bang_gia_lap"),
+                                       bg=COL_BLUE, container_bg=COL_BG, font=("Segoe UI", 9, "bold")))
+        actions_bar.add(RoundedButton(actions_bar, "🆕 Setup Người Mới", command=lambda: self._quick_action("setup_nguoi_moi"),
+                                       bg=COL_ORANGE, container_bg=COL_BG, font=("Segoe UI", 9, "bold")))
+        actions_bar.add(RoundedButton(actions_bar, "📖 Hướng Dẫn", command=lambda: self._quick_action("huong_dan"),
+                                       bg=COL_PURPLE, container_bg=COL_BG, font=("Segoe UI", 9, "bold")))
 
         self.auto_login_var = tk.BooleanVar(value=bool(self._settings.get("auto_login", False)))
-        DarkCheck(actions_bar, "Tự Login", self.auto_login_var, bg=COL_BG).pack(side="left", padx=10)
+        actions_bar.add(DarkCheck(actions_bar, "Tự Login", self.auto_login_var, bg=COL_BG))
 
         self.account_rotate_var = tk.BooleanVar(value=bool(self._settings.get("account_rotate", False)))
-        DarkCheck(actions_bar, "Xoay Vòng Tài Khoản", self.account_rotate_var, bg=COL_BG).pack(side="left", padx=10)
+        actions_bar.add(DarkCheck(actions_bar, "Xoay Vòng Tài Khoản", self.account_rotate_var, bg=COL_BG))
 
-        RoundedButton(actions_bar, "👥 Quản Lý Tài Khoản", command=self._open_account_manager,
-                      bg=COL_PURPLE, container_bg=COL_BG, font=("Segoe UI", 9, "bold")).pack(side="left", padx=3)
+        actions_bar.add(RoundedButton(actions_bar, "👥 Quản Lý Tài Khoản", command=self._open_account_manager,
+                                       bg=COL_PURPLE, container_bg=COL_BG, font=("Segoe UI", 9, "bold")))
 
-        RoundedButton(actions_bar, "⚡ Log Nhanh", command=self._open_quick_login_dialog,
-                      bg=COL_GREEN, container_bg=COL_BG, font=("Segoe UI", 9, "bold")).pack(side="left", padx=3)
+        actions_bar.add(RoundedButton(actions_bar, "⚡ Log Nhanh", command=self._open_quick_login_dialog,
+                                       bg=COL_GREEN, container_bg=COL_BG, font=("Segoe UI", 9, "bold")))
 
-        RoundedButton(actions_bar, "⏰ Hẹn Giờ", command=self._open_schedule_manager,
-                      bg=COL_TEAL, container_bg=COL_BG, font=("Segoe UI", 9, "bold")).pack(side="left", padx=3)
+        actions_bar.add(RoundedButton(actions_bar, "⏰ Hẹn Giờ", command=self._open_schedule_manager,
+                                       bg=COL_TEAL, container_bg=COL_BG, font=("Segoe UI", 9, "bold")))
+
+        actions_bar.add(RoundedButton(actions_bar, "🚗 Quét Xe", command=lambda: self._quick_action("quet_xe"),
+                                       bg=COL_ORANGE, container_bg=COL_BG, font=("Segoe UI", 9, "bold")))
+        actions_bar.add(RoundedButton(actions_bar, "🆔 UID Like", command=lambda: self._quick_action("uid_like"),
+                                       bg=COL_BLUE, container_bg=COL_BG, font=("Segoe UI", 9, "bold")))
+
+        self.btn_view_errors = RoundedButton(
+            actions_bar, "⚠ Xem Lỗi / Chưa Xong (0)", command=self.show_error_panel,
+            bg=COL_RED, container_bg=COL_BG, font=("Segoe UI", 9, "bold"))
+        actions_bar.add(self.btn_view_errors)
+
+        actions_bar.add(RoundedButton(actions_bar, "🛍 Cài Đặt Shop", command=lambda: self._quick_action("cai_dat_shop"),
+                                       bg=COL_GREEN, container_bg=COL_BG, font=("Segoe UI", 9, "bold")))
 
         # ===== 2 tuỳ chọn HẬU KỲ (áp dụng SAU KHI 1 giả lập chạy xong hết
         # tác vụ của lượt hiện tại - chạy tay/Chạy Ngay/Xoay Vòng Tài Khoản
         # /lịch hẹn giờ đều dùng chung, xem _apply_post_run_options). Đặt ở
-        # 1 dòng riêng (actions_bar2) để không làm chật dòng nút phía trên. =====
-        actions_bar2 = tk.Frame(self.root, bg=COL_BG)
+        # 1 dòng riêng (actions_bar2, cũng là FlowBar để tự xuống dòng) để
+        # không làm chật dòng nút phía trên. =====
+        actions_bar2 = FlowBar(self.root, bg=COL_BG)
         actions_bar2.pack(fill="x", padx=10, pady=(0, 8))
 
         self.shutdown_after_var = tk.BooleanVar(value=bool(self._settings.get("shutdown_after", False)))
-        DarkCheck(actions_bar2, "🔌 Tắt Giả Lập Sau Khi Chạy Xong", self.shutdown_after_var,
-                  bg=COL_BG).pack(side="left", padx=10)
+        actions_bar2.add(DarkCheck(actions_bar2, "🔌 Tắt Giả Lập Sau Khi Chạy Xong", self.shutdown_after_var,
+                                    bg=COL_BG))
 
         # Giả lập nào áp dụng / bỏ qua tuỳ chọn tắt giả lập ở trên - mỗi
         # giả lập độc lập (self._shutdown_after_by_emulator, khoá là
@@ -81,13 +99,13 @@ class UIBuildMixin:
         self._shutdown_after_by_emulator = self._settings.get("shutdown_after_by_emulator", {}) or {}
         self.lbl_shutdown_after = tk.Label(actions_bar2, text=self._shutdown_after_label_text(),
                                             bg=COL_BG, fg=COL_TEXT_MUTED, font=("Segoe UI", 8))
-        self.lbl_shutdown_after.pack(side="left", padx=(0, 4))
-        RoundedButton(actions_bar2, "⚙ Chọn Giả Lập", command=self._pick_shutdown_emulators,
-                      bg=COL_PURPLE, container_bg=COL_BG, font=("Segoe UI", 8, "bold")).pack(side="left", padx=(0, 10))
+        actions_bar2.add(self.lbl_shutdown_after)
+        actions_bar2.add(RoundedButton(actions_bar2, "⚙ Chọn Giả Lập", command=self._pick_shutdown_emulators,
+                                        bg=COL_PURPLE, container_bg=COL_BG, font=("Segoe UI", 8, "bold")))
 
         self.post_login_after_var = tk.BooleanVar(value=bool(self._settings.get("post_login_after", False)))
-        DarkCheck(actions_bar2, "🔑 Đăng Nhập TK Chỉ Định Sau Khi Chạy Xong", self.post_login_after_var,
-                  bg=COL_BG).pack(side="left", padx=10)
+        actions_bar2.add(DarkCheck(actions_bar2, "🔑 Đăng Nhập TK Chỉ Định Sau Khi Chạy Xong", self.post_login_after_var,
+                                    bg=COL_BG))
 
         # Mỗi giả lập được gán 1 Tài khoản RIÊNG (self._post_login_account_by_emulator,
         # khoá là str(emulator.index)) thay vì dùng chung đúng 1 TK cho mọi giả lập -
@@ -95,54 +113,60 @@ class UIBuildMixin:
         self._post_login_account_by_emulator = self._settings.get("post_login_account_by_emulator", {}) or {}
         self.lbl_post_login_account = tk.Label(actions_bar2, text=self._post_login_account_label_text(),
                                                 bg=COL_BG, fg=COL_TEXT_MUTED, font=("Segoe UI", 8))
-        self.lbl_post_login_account.pack(side="left", padx=(0, 4))
-        RoundedButton(actions_bar2, "🎯 Chọn TK Theo Giả Lập", command=self._pick_post_login_account,
-                      bg=COL_PURPLE, container_bg=COL_BG, font=("Segoe UI", 8, "bold")).pack(side="left", padx=(0, 10))
-
-        RoundedButton(actions_bar, "🚗 Quét Xe", command=lambda: self._quick_action("quet_xe"),
-                      bg=COL_ORANGE, container_bg=COL_BG, font=("Segoe UI", 9, "bold")).pack(side="left", padx=3)
-        RoundedButton(actions_bar, "🆔 UID Like", command=lambda: self._quick_action("uid_like"),
-                      bg=COL_BLUE, container_bg=COL_BG, font=("Segoe UI", 9, "bold")).pack(side="left", padx=3)
-
-        self.btn_view_errors = RoundedButton(
-            actions_bar, "⚠ Xem Lỗi / Chưa Xong (0)", command=self.show_error_panel,
-            bg=COL_RED, container_bg=COL_BG, font=("Segoe UI", 9, "bold"))
-        self.btn_view_errors.pack(side="left", padx=3)
-
-        RoundedButton(actions_bar, "🛍 Cài Đặt Shop", command=lambda: self._quick_action("cai_dat_shop"),
-                      bg=COL_GREEN, container_bg=COL_BG, font=("Segoe UI", 9, "bold")).pack(side="left", padx=3)
+        actions_bar2.add(self.lbl_post_login_account)
+        actions_bar2.add(RoundedButton(actions_bar2, "🎯 Chọn TK Theo Giả Lập", command=self._pick_post_login_account,
+                                        bg=COL_PURPLE, container_bg=COL_BG, font=("Segoe UI", 8, "bold")))
 
     def _build_emulator_bar(self):
+        # Tách thành 2 DÒNG RIÊNG (thay vì nhồi chung 1 dòng "nhãn + chip giả
+        # lập (expand) + cụm nút" như bản cũ) - cách cũ khiến vùng chip giả
+        # lập (fill='x', expand=True) tranh chỗ trực tiếp với cụm nút bên
+        # phải, nên khi thu nhỏ cửa sổ, các nút bị ĐẨY RA NGOÀI VÙNG HIỂN THỊ
+        # (biến mất) thay vì tự co giãn/xuống dòng. Tách riêng: dòng 1 = nhãn
+        # + FlowBar các chip giả lập (tự xuống dòng khi nhiều giả lập), dòng
+        # 2 = FlowBar cụm nút thao tác giả lập (cũng tự xuống dòng) - không
+        # dòng nào còn phải tranh chỗ với dòng kia nữa.
         bar = tk.Frame(self.root, bg=COL_PANEL, highlightbackground=COL_BORDER, highlightthickness=1)
         bar.pack(fill="x", padx=10, pady=(0, 8))
 
-        tk.Label(bar, text="🖥 Giả lập:", bg=COL_PANEL, fg=COL_TEXT_MUTED,
+        chip_row = tk.Frame(bar, bg=COL_PANEL)
+        chip_row.pack(fill="x")
+
+        tk.Label(chip_row, text="🖥 Giả lập:", bg=COL_PANEL, fg=COL_TEXT_MUTED,
                  font=("Segoe UI", 9, "bold")).pack(side="left", padx=(10, 6), pady=8)
 
-        self.emu_chip_frame = tk.Frame(bar, bg=COL_PANEL)
-        self.emu_chip_frame.pack(side="left", fill="x", expand=True)
+        # FlowBar (không còn là Frame thường) - các chip giả lập được
+        # dashboard_emulators.py thêm vào bằng self.emu_chip_frame.add(...)
+        # và dọn sạch bằng self.emu_chip_frame.clear() mỗi lần quét lại,
+        # THAY VÌ .pack(side="left") + tự lặp winfo_children() để destroy()
+        # như trước - để chip TỰ XUỐNG DÒNG khi có nhiều giả lập/cửa sổ hẹp.
+        self.emu_chip_frame = FlowBar(chip_row, bg=COL_PANEL)
+        self.emu_chip_frame.pack(side="left", fill="x", expand=True, pady=4)
 
-        RoundedButton(bar, "🔄 Quét Lại Danh Mục", command=self.reload_tasks,
-                      bg=COL_GRAY_BTN, container_bg=COL_PANEL,
-                      font=("Segoe UI", 8, "bold"), padx=8, pady=4).pack(side="right", padx=3, pady=6)
-        RoundedButton(bar, "☐ Bỏ Chọn", command=lambda: self._set_all_checks(False),
-                      bg=COL_GRAY_BTN, container_bg=COL_PANEL,
-                      font=("Segoe UI", 8, "bold"), padx=8, pady=4).pack(side="right", padx=3, pady=6)
-        RoundedButton(bar, "☑ Chọn Tất Cả", command=lambda: self._set_all_checks(True),
-                      bg=COL_GRAY_BTN, container_bg=COL_PANEL,
-                      font=("Segoe UI", 8, "bold"), padx=8, pady=4).pack(side="right", padx=3, pady=6)
-        RoundedButton(bar, "🔄 Quét Giả Lập", command=self.refresh_emulators,
-                      bg=COL_TEAL, container_bg=COL_PANEL,
-                      font=("Segoe UI", 8, "bold"), padx=8, pady=4).pack(side="right", padx=6, pady=6)
-        RoundedButton(bar, "🔴 Tắt Đã Chọn", command=self.quit_selected_emulators,
-                      bg=COL_RED, container_bg=COL_PANEL,
-                      font=("Segoe UI", 8, "bold"), padx=8, pady=4).pack(side="right", padx=3, pady=6)
-        RoundedButton(bar, "🟢 Bật Đã Chọn", command=self.launch_selected_emulators,
-                      bg=COL_GREEN, container_bg=COL_PANEL,
-                      font=("Segoe UI", 8, "bold"), padx=8, pady=4).pack(side="right", padx=3, pady=6)
-        RoundedButton(bar, "📁 Chọn ldconsole.exe", command=self.choose_ldconsole_path,
-                      bg=COL_GRAY_BTN, container_bg=COL_PANEL,
-                      font=("Segoe UI", 8, "bold"), padx=8, pady=4).pack(side="right", padx=3, pady=6)
+        btn_row = FlowBar(bar, bg=COL_PANEL)
+        btn_row.pack(fill="x", padx=8, pady=(0, 6))
+
+        btn_row.add(RoundedButton(btn_row, "📁 Chọn ldconsole.exe", command=self.choose_ldconsole_path,
+                                   bg=COL_GRAY_BTN, container_bg=COL_PANEL,
+                                   font=("Segoe UI", 8, "bold"), padx=8, pady=4))
+        btn_row.add(RoundedButton(btn_row, "🟢 Bật Đã Chọn", command=self.launch_selected_emulators,
+                                   bg=COL_GREEN, container_bg=COL_PANEL,
+                                   font=("Segoe UI", 8, "bold"), padx=8, pady=4))
+        btn_row.add(RoundedButton(btn_row, "🔴 Tắt Đã Chọn", command=self.quit_selected_emulators,
+                                   bg=COL_RED, container_bg=COL_PANEL,
+                                   font=("Segoe UI", 8, "bold"), padx=8, pady=4))
+        btn_row.add(RoundedButton(btn_row, "🔄 Quét Giả Lập", command=self.refresh_emulators,
+                                   bg=COL_TEAL, container_bg=COL_PANEL,
+                                   font=("Segoe UI", 8, "bold"), padx=8, pady=4))
+        btn_row.add(RoundedButton(btn_row, "☑ Chọn Tất Cả", command=lambda: self._set_all_checks(True),
+                                   bg=COL_GRAY_BTN, container_bg=COL_PANEL,
+                                   font=("Segoe UI", 8, "bold"), padx=8, pady=4))
+        btn_row.add(RoundedButton(btn_row, "☐ Bỏ Chọn", command=lambda: self._set_all_checks(False),
+                                   bg=COL_GRAY_BTN, container_bg=COL_PANEL,
+                                   font=("Segoe UI", 8, "bold"), padx=8, pady=4))
+        btn_row.add(RoundedButton(btn_row, "🔄 Quét Lại Danh Mục", command=self.reload_tasks,
+                                   bg=COL_GRAY_BTN, container_bg=COL_PANEL,
+                                   font=("Segoe UI", 8, "bold"), padx=8, pady=4))
 
     def _build_task_scroll_area(self):
         outer = tk.Frame(self.root, bg=COL_BG)

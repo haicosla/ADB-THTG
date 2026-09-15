@@ -394,13 +394,27 @@ class AccountsMixin:
         btn_bar.add(RoundedButton(btn_bar, "💾 Lưu Tất Cả", command=_save_all,
                                    bg=COL_GREEN, container_bg=COL_PANEL, font=("Segoe UI", 9, "bold")))
 
-    # ================= ⚡ LOG NHANH (chọn 1 giả lập + 1 tài khoản, đăng nhập ngay) =================
+    # ================= ⚡ LOG NHANH (chọn NHIỀU giả lập, mỗi giả lập gán 1 tài khoản, đăng nhập đồng thời, lưu theo Nhóm) =================
     def _open_quick_login_dialog(self):
-        """Popup '⚡ Log Nhanh' - chọn ĐÚNG 1 Giả lập + ĐÚNG 1 Tài khoản rồi
-        đăng nhập NGAY LẬP TỨC (đăng xuất tài khoản cũ trước, nếu có Hoạt
-        Động 'account_logout'), KHÔNG cần mở popup 'Xoay Vòng Tài Khoản'
-        hay tick chọn Hoạt Động/chạy nguyên phiên - dùng khi chỉ cần đổi
-        nhanh/kiểm tra 1 tài khoản trên 1 giả lập cụ thể."""
+        """Popup '⚡ Log Nhanh' - tick chọn 1 hay NHIỀU Giả lập, mỗi giả lập
+        được gán ĐÚNG 1 Tài khoản (qua combobox riêng trên từng dòng) rồi
+        đăng nhập NGAY LẬP TỨC & ĐỒNG THỜI trên TẤT CẢ giả lập đã tick
+        (đăng xuất tài khoản cũ trước, nếu có Hoạt Động 'account_logout'),
+        KHÔNG cần mở popup 'Xoay Vòng Tài Khoản' hay tick chọn Hoạt
+        Động/chạy nguyên phiên - dùng khi cần đổi nhanh/kiểm tra nhiều tài
+        khoản trên nhiều giả lập cùng lúc. Mỗi cặp Giả lập/Tài khoản được
+        khởi chạy qua '_start_quick_login' RIÊNG (1 luồng nền/giả lập) nên
+        các giả lập đăng nhập SONG SONG, không chờ nhau.
+
+        Có thêm 'Nhóm Log Nhanh' (xem account_manager.load/save/delete_
+        quick_login_group) - 1 bộ gán SẴN Giả lập <-> Tài khoản đã đặt
+        tên, LƯU LẠI để chọn 1 phát ra đúng bộ tick + Tài khoản đó (vd
+        Nhóm 1 = dàn giả lập X đi kèm 4 tài khoản A, Nhóm 2 = CÙNG dàn
+        giả lập X đó nhưng đi kèm 4 tài khoản B khác) thay vì phải chọn
+        tay lại từ đầu mỗi lần đổi lượt tài khoản. Bấm '🔑 Đăng Nhập Ngay'
+        KHÔNG tự đóng cửa sổ này nữa - để có thể tiếp tục theo dõi/đổi
+        Nhóm khác và bấm đăng nhập tiếp cho đợt giả lập khác mà không cần
+        mở lại popup từ đầu."""
         if not getattr(self, "emulators", None):
             messagebox.showinfo("Chưa có giả lập",
                                  "Chưa quét được giả lập nào - bấm '🔄 Quét Giả Lập' rồi thử lại.")
@@ -414,44 +428,190 @@ class AccountsMixin:
         win = tk.Toplevel(self.root)
         win.title("⚡ Log Nhanh")
         win.configure(bg=COL_PANEL)
-        win.geometry("440x210")
-        win.resizable(False, False)
+        win.geometry("700x620")
+        win.minsize(620, 420)
+        win.transient(self.root)
+        win.grab_set()
+        win.focus_set()
         _bind_esc_close(win)
 
-        tk.Label(win, text="Chọn 1 Giả lập + 1 Tài khoản để đăng nhập NGAY (tự đăng xuất tài khoản cũ trước nếu "
-                            "có Hoạt Động 'account_logout', cần có Hoạt Động 'account_login' để hoạt động):",
+        tk.Label(win, text="Tick chọn 1 hay NHIỀU Giả lập, chọn Tài khoản cho từng giả lập rồi bấm "
+                            "'🔑 Đăng Nhập Ngay' để đăng nhập ĐỒNG THỜI trên tất cả cùng lúc (tự đăng xuất tài "
+                            "khoản cũ trước nếu có Hoạt Động 'account_logout', cần có Hoạt Động 'account_login' "
+                            "để hoạt động). Có thể LƯU bộ tick+Tài khoản hiện tại thành 1 'Nhóm' để chọn lại "
+                            "nhanh sau này:",
                  bg=COL_PANEL, fg=COL_TEXT, font=("Segoe UI", 9, "bold"),
-                 wraplength=400, justify="left").pack(anchor="w", padx=14, pady=(14, 10))
+                 wraplength=670, justify="left").pack(anchor="w", padx=14, pady=(14, 8))
 
-        row1 = tk.Frame(win, bg=COL_PANEL)
-        row1.pack(fill="x", padx=14, pady=4)
-        tk.Label(row1, text="Giả lập:", bg=COL_PANEL, fg=COL_TEXT_MUTED, width=10, anchor="w",
-                 font=("Segoe UI", 9)).pack(side="left")
-        emu_labels = [f"#{e.index} - {e.name}" + ("" if e.running else " (đang tắt)") for e in self.emulators]
-        emu_var = tk.StringVar(value=emu_labels[0] if emu_labels else "")
-        ttk.Combobox(row1, textvariable=emu_var, values=emu_labels, width=32,
-                     state="readonly").pack(side="left", padx=4)
-
-        row2 = tk.Frame(win, bg=COL_PANEL)
-        row2.pack(fill="x", padx=14, pady=4)
-        tk.Label(row2, text="Tài khoản:", bg=COL_PANEL, fg=COL_TEXT_MUTED, width=10, anchor="w",
-                 font=("Segoe UI", 9)).pack(side="left")
+        acc_by_id = {a.get("id"): a for a in accounts}
         acc_labels = [(a.get("ten_hien_thi") or a.get("username") or a.get("id")) +
                       (f"  [{a.get('nhom')}]" if a.get("nhom") else "") for a in accounts]
-        acc_var = tk.StringVar(value=acc_labels[0] if acc_labels else "")
-        ttk.Combobox(row2, textvariable=acc_var, values=acc_labels, width=32,
-                     state="readonly").pack(side="left", padx=4)
+        acc_label_by_id = {a.get("id"): lbl for a, lbl in zip(accounts, acc_labels)}
+
+        quick_groups = account_manager.load_quick_login_groups()
+
+        # ----- Hàng chọn/lưu/xoá 'Nhóm Log Nhanh' -----
+        group_bar = tk.Frame(win, bg=COL_PANEL)
+        group_bar.pack(fill="x", padx=14, pady=(0, 6))
+        tk.Label(group_bar, text="Nhóm:", bg=COL_PANEL, fg=COL_TEXT_MUTED, font=("Segoe UI", 9)).pack(side="left")
+        group_var = tk.StringVar(value="")
+        group_combo = ttk.Combobox(group_bar, textvariable=group_var, values=sorted(quick_groups.keys()),
+                                    width=20)
+        group_combo.pack(side="left", padx=(4, 8))
+
+        # ----- Hàng nút Chọn Tất Cả/Bỏ Chọn/Đăng Nhập Ngay - PACK TRƯỚC
+        # vùng cuộn (side="bottom") để LUÔN CHIẾM SẴN chỗ, không bị khuất
+        # trên cửa sổ nhỏ (giống _open_gan_may_tk_dialog ở dashboard_schedule.py). -----
+        btn_bar = FlowBar(win, bg=COL_PANEL)
+        btn_bar.pack(side="bottom", fill="x", padx=14, pady=(0, 10))
+
+        status_lbl = tk.Label(win, text="", bg=COL_PANEL, fg=COL_TEXT_MUTED, font=("Segoe UI", 8, "italic"),
+                               wraplength=670, justify="left")
+        status_lbl.pack(side="bottom", anchor="w", padx=14, pady=(0, 2))
+
+        canvas = tk.Canvas(win, bg=COL_PANEL, highlightthickness=0)
+        vbar = ttk.Scrollbar(win, orient="vertical", command=canvas.yview)
+        inner = tk.Frame(canvas, bg=COL_PANEL)
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.configure(yscrollcommand=vbar.set)
+        canvas.pack(side="left", fill="both", expand=True, padx=(14, 0), pady=4)
+        vbar.pack(side="right", fill="y", padx=(0, 8))
+
+        row_state = {}  # emulator_index -> {"emulator": obj, "check_var": BooleanVar, "acc_var": StringVar}
+
+        for e in self.emulators:
+            row = tk.Frame(inner, bg=COL_PANEL_ALT)
+            row.pack(fill="x", pady=2, padx=2)
+
+            check_var = tk.BooleanVar(value=False)
+            DarkCheck(row, "", check_var, bg=COL_PANEL_ALT, box_size=14).pack(side="left", padx=(6, 2), pady=6)
+
+            label = f"#{e.index} - {e.name}" + ("" if e.running else " (đang tắt)")
+            tk.Label(row, text=label, bg=COL_PANEL_ALT, fg=COL_TEXT, font=("Segoe UI", 9),
+                     anchor="w", width=24).pack(side="left", padx=4, pady=6)
+
+            acc_var = tk.StringVar(value=acc_labels[0] if acc_labels else "")
+            ttk.Combobox(row, textvariable=acc_var, values=acc_labels, width=28,
+                         state="readonly").pack(side="left", padx=4, pady=6, fill="x", expand=True)
+
+            row_state[e.index] = {"emulator": e, "check_var": check_var, "acc_var": acc_var}
+
+        def _set_all(value):
+            for st in row_state.values():
+                st["check_var"].set(value)
+
+        def _refresh_group_values(select=None):
+            names = sorted(quick_groups.keys())
+            group_combo.configure(values=names)
+            group_var.set(select if select is not None else "")
+
+        def _apply_group():
+            name = group_var.get().strip()
+            mapping = quick_groups.get(name)
+            if not name or mapping is None:
+                messagebox.showinfo("Chưa chọn Nhóm",
+                                     "Hãy chọn (hoặc gõ đúng) tên 1 Nhóm Log Nhanh đã lưu ở ô 'Nhóm' rồi bấm lại.",
+                                     parent=win)
+                return
+            missing = []
+            applied = 0
+            _set_all(False)
+            for idx_str, acc_id in mapping.items():
+                try:
+                    idx = int(idx_str)
+                except ValueError:
+                    continue
+                st = row_state.get(idx)
+                acc_label = acc_label_by_id.get(acc_id)
+                if not st or acc_id not in acc_by_id or acc_label is None:
+                    missing.append(idx_str)
+                    continue
+                st["check_var"].set(True)
+                st["acc_var"].set(acc_label)
+                applied += 1
+            msg = f"Đã áp dụng Nhóm '{name}': {applied} giả lập."
+            if missing:
+                msg += (f" ({len(missing)} dòng trong Nhóm này bị bỏ qua vì giả lập/tài khoản không còn tồn tại: "
+                        f"{', '.join(missing)})")
+            status_lbl.configure(text=msg)
+
+        def _save_group():
+            name = group_var.get().strip()
+            if not name:
+                messagebox.showinfo("Chưa đặt tên Nhóm",
+                                     "Hãy gõ 1 tên cho Nhóm (vd 'Nhóm 1') vào ô 'Nhóm' rồi bấm lại để lưu.",
+                                     parent=win)
+                return
+            mapping = {}
+            for idx, st in row_state.items():
+                if not st["check_var"].get() or not st["acc_var"].get():
+                    continue
+                account = accounts[acc_labels.index(st["acc_var"].get())]
+                mapping[str(idx)] = account.get("id")
+            if not mapping:
+                messagebox.showinfo("Chưa tick giả lập nào",
+                                     "Hãy tick ít nhất 1 giả lập + chọn Tài khoản cho giả lập đó trước khi lưu "
+                                     "thành Nhóm.", parent=win)
+                return
+            overwrite = name in quick_groups
+            quick_groups[name] = account_manager.save_quick_login_group(name, mapping)[name]
+            _refresh_group_values(select=name)
+            status_lbl.configure(text=f"Đã {'ghi đè' if overwrite else 'lưu'} Nhóm '{name}' ({len(mapping)} giả lập).")
+
+        def _delete_group():
+            name = group_var.get().strip()
+            if not name or name not in quick_groups:
+                messagebox.showinfo("Không tìm thấy Nhóm",
+                                     "Hãy chọn đúng tên 1 Nhóm Log Nhanh đã lưu ở ô 'Nhóm' rồi bấm lại để xoá.",
+                                     parent=win)
+                return
+            if not messagebox.askyesno("Xoá Nhóm", f"Xoá hẳn Nhóm '{name}' đã lưu?", parent=win):
+                return
+            account_manager.delete_quick_login_group(name)
+            quick_groups.pop(name, None)
+            _refresh_group_values()
+            status_lbl.configure(text=f"Đã xoá Nhóm '{name}'.")
+
+        group_bar_btns = FlowBar(group_bar, bg=COL_PANEL)
+        group_bar_btns.pack(side="left", fill="x", expand=True)
+        group_bar_btns.add(RoundedButton(group_bar_btns, "📂 Áp Dụng", command=_apply_group, bg=COL_PURPLE,
+                                          container_bg=COL_PANEL, font=("Segoe UI", 8, "bold"), padx=10, pady=5))
+        group_bar_btns.add(RoundedButton(group_bar_btns, "💾 Lưu thành Nhóm", command=_save_group, bg=COL_GRAY_BTN,
+                                          container_bg=COL_PANEL, font=("Segoe UI", 8, "bold"), padx=10, pady=5))
+        group_bar_btns.add(RoundedButton(group_bar_btns, "🗑️ Xoá Nhóm", command=_delete_group, bg=COL_GRAY_BTN,
+                                          container_bg=COL_PANEL, font=("Segoe UI", 8, "bold"), padx=10, pady=5))
 
         def _confirm():
-            if not emu_var.get() or not acc_var.get():
+            pairs = []
+            for st in row_state.values():
+                if not st["check_var"].get() or not st["acc_var"].get():
+                    continue
+                account = accounts[acc_labels.index(st["acc_var"].get())]
+                pairs.append((st["emulator"], account))
+            if not pairs:
+                messagebox.showinfo("Chưa chọn giả lập",
+                                     "Hãy tick ít nhất 1 giả lập và chọn Tài khoản cho giả lập đó.", parent=win)
                 return
-            emulator = self.emulators[emu_labels.index(emu_var.get())]
-            account = accounts[acc_labels.index(acc_var.get())]
-            win.destroy()
-            self._start_quick_login(emulator, account)
+            # KHÔNG đóng cửa sổ (win.destroy()) nữa - để người dùng còn thấy
+            # trạng thái, đổi Nhóm khác, hoặc bấm đăng nhập tiếp cho đợt
+            # giả lập khác mà không phải mở lại popup từ đầu. Mỗi cặp Giả
+            # lập/Tài khoản được khởi qua '_start_quick_login' RIÊNG - mỗi
+            # lần gọi tự mở 1 luồng nền (xem _worker_quick_login) nên vòng
+            # lặp này chỉ tuần tự ở bước "khởi", còn việc đăng nhập thực tế
+            # trên từng giả lập chạy SONG SONG với nhau.
+            for emulator, account in pairs:
+                self._start_quick_login(emulator, account)
+            ten_list = ", ".join(e.name for e, _a in pairs)
+            status_lbl.configure(text=f"⏳ Đã bắt đầu đăng nhập song song trên {len(pairs)} giả lập: {ten_list} "
+                                       f"- theo dõi tiến trình ở khung Nhật Ký.")
 
-        RoundedButton(win, "🔑 Đăng Nhập Ngay", command=_confirm, bg=COL_GREEN, container_bg=COL_PANEL,
-                      font=("Segoe UI", 9, "bold"), padx=16, pady=8).pack(pady=14)
+        btn_bar.add(RoundedButton(btn_bar, "☑️ Chọn Tất Cả", command=lambda: _set_all(True), bg=COL_GRAY_BTN,
+                                   container_bg=COL_PANEL, font=("Segoe UI", 8, "bold"), padx=10, pady=6))
+        btn_bar.add(RoundedButton(btn_bar, "◻️ Bỏ Chọn", command=lambda: _set_all(False), bg=COL_GRAY_BTN,
+                                   container_bg=COL_PANEL, font=("Segoe UI", 8, "bold"), padx=10, pady=6))
+        btn_bar.add(RoundedButton(btn_bar, "🔑 Đăng Nhập Ngay", command=_confirm, bg=COL_GREEN,
+                                   container_bg=COL_PANEL, font=("Segoe UI", 9, "bold"), padx=16, pady=8))
 
     def _start_quick_login(self, emulator, account):
         """Kiểm tra giả lập có đang bận không rồi bắt đầu luồng nền Log

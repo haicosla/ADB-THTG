@@ -179,3 +179,71 @@ def list_groups(entries):
     bảng chữ cái - dùng để gợi ý trong combobox 'Nhóm' và dựng các nút lọc
     nhanh theo nhóm."""
     return sorted({(e.get("nhom") or "").strip() for e in entries if (e.get("nhom") or "").strip()})
+
+
+QUICK_LOGIN_GROUPS_PATH = "quick_login_groups.json"
+
+
+def load_quick_login_groups(path=QUICK_LOGIN_GROUPS_PATH):
+    """Đọc danh sách 'Nhóm Log Nhanh' đã lưu - KHÁC với 'nhom' (field phân
+    loại tự do gắn trên từng tài khoản ở trên): mỗi Nhóm ở đây là 1 bộ GÁN
+    SẴN Giả lập <-> Tài khoản CỤ THỂ cho popup '⚡ Log Nhanh' (vd Nhóm 1:
+    giả lập #0-#3 lần lượt đi kèm 4 tài khoản A/B/C/D, Nhóm 2: CŨNG giả
+    lập #0-#3 đó nhưng đi kèm 4 tài khoản E/F/G/H khác) - chọn 1 Nhóm là
+    tự tick + gán đúng Tài khoản cho từng dòng, không cần chọn tay lại từ
+    đầu mỗi lần đổi lượt tài khoản khác nhau trên cùng dàn giả lập.
+
+    Trả về dict {ten_nhom: {str(emulator_index): tai_khoan_id}}, giữ
+    NGUYÊN THỨ TỰ đã lưu (Python dict giữ thứ tự chèn). Trả về {} nếu
+    chưa từng lưu Nhóm Log Nhanh nào (không có sẵn gợi ý mặc định, khác
+    2 Nhóm tài khoản mặc định ở load_group_presets - vì bộ gán Giả lập
+    <-> Tài khoản cụ thể chỉ có ý nghĩa với ĐÚNG dàn giả lập/tài khoản
+    của từng người dùng, không thể đoán trước)."""
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            cleaned = {}
+            for name, mapping in data.items():
+                name = str(name).strip()
+                if not name or not isinstance(mapping, dict):
+                    continue
+                cleaned[name] = {str(k): v for k, v in mapping.items() if v}
+            return cleaned
+    except Exception:
+        pass
+    return {}
+
+
+def save_quick_login_groups(groups, path=QUICK_LOGIN_GROUPS_PATH):
+    """Lưu đè TOÀN BỘ danh sách 'Nhóm Log Nhanh' (dict {ten_nhom:
+    {str(emulator_index): tai_khoan_id}}) xuống file. Trả về dict đã dọn
+    dẹp (bỏ tên rỗng/giá trị không hợp lệ)."""
+    cleaned = {}
+    for name, mapping in groups.items():
+        name = str(name).strip()
+        if not name or not isinstance(mapping, dict):
+            continue
+        cleaned[name] = {str(k): v for k, v in mapping.items() if v}
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cleaned, f, indent=2, ensure_ascii=False)
+    return cleaned
+
+
+def save_quick_login_group(name, mapping, path=QUICK_LOGIN_GROUPS_PATH):
+    """Lưu (thêm mới nếu chưa có/ghi đè nếu trùng tên) ĐÚNG 1 'Nhóm Log
+    Nhanh', giữ nguyên các Nhóm khác đã lưu trước đó. Trả về dict đầy đủ
+    sau khi lưu."""
+    groups = load_quick_login_groups(path)
+    groups[str(name).strip()] = {str(k): v for k, v in mapping.items() if v}
+    return save_quick_login_groups(groups, path)
+
+
+def delete_quick_login_group(name, path=QUICK_LOGIN_GROUPS_PATH):
+    """Xoá 1 'Nhóm Log Nhanh' đã lưu theo tên (bỏ qua im lặng nếu tên đó
+    không tồn tại). Trả về dict đầy đủ sau khi xoá."""
+    groups = load_quick_login_groups(path)
+    groups.pop(str(name).strip(), None)
+    return save_quick_login_groups(groups, path)
