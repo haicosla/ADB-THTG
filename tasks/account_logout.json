@@ -1,0 +1,132 @@
+[
+  {
+    "action": "tap",
+    "pos": [
+      0.1742,
+      0.9569
+    ],
+    "repeat": 1,
+    "delay": 0.7,
+    "comment": "Tap [17%, 95%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.1186,
+      0.951
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [11%, 95%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.1186,
+      0.951
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [11%, 95%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.1186,
+      0.951
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [11%, 95%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.1186,
+      0.951
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [11%, 95%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.1186,
+      0.951
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [11%, 95%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.1186,
+      0.951
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [11%, 95%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.1186,
+      0.951
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [11%, 95%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.024,
+      0.4088
+    ],
+    "repeat": 1,
+    "delay": 0.92,
+    "comment": "Tap [2%, 40%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.0541,
+      0.5042
+    ],
+    "repeat": 1,
+    "delay": 0.62,
+    "comment": "Tap [5%, 50%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.6727,
+      0.7652
+    ],
+    "repeat": 1,
+    "delay": 1.5,
+    "comment": "Tap [67%, 76%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.7042,
+      0.9358
+    ],
+    "repeat": 1,
+    "delay": 5.0,
+    "comment": "Tap [70%, 93%]"
+  },
+  {
+    "action": "wait_image",
+    "template": "icon_161x45_25902.png",
+    "timeout": 8,
+    "conf": 0.8,
+    "click": true,
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Click ảnh: icon_161x45_25902.png"
+  }
+]

@@ -1,0 +1,60 @@
+[
+  {
+    "action": "group_start",
+    "delay": 0.1,
+    "comment": "Nhóm lặp",
+    "repeat_mode": "count",
+    "repeat": 10
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.1745,
+      0.7148
+    ],
+    "repeat": 2,
+    "delay": 0.5,
+    "comment": "Tap [17%, 71%]",
+    "repeat_mode": "count"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.1745,
+      0.7148
+    ],
+    "repeat": 1,
+    "delay": 2.0,
+    "comment": "Tap [17%, 71%]",
+    "repeat_mode": "count"
+  },
+  {
+    "action": "wait_image",
+    "template": "icon_211x204_9556.png",
+    "timeout": 15,
+    "conf": 0.8,
+    "click": true,
+    "repeat": 1,
+    "delay": 0.1,
+    "comment": "Click ảnh: icon_211x204_9556.png",
+    "region": [
+      0.3,
+      0.4471,
+      0.7706,
+      0.7214
+    ],
+    "scan_interval": 0.02
+  },
+  {
+    "action": "sleep",
+    "repeat": 1,
+    "delay": 2.0,
+    "comment": "Chờ 2.0s"
+  },
+  {
+    "action": "group_end",
+    "repeat": 1,
+    "delay": 2.0,
+    "comment": "Đóng nhóm"
+  }
+]

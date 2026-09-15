@@ -1,0 +1,260 @@
+[
+  {
+    "action": "wait_image",
+    "template": "icon_148x38_26450.png",
+    "timeout": 8,
+    "conf": 0.8,
+    "click": true,
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Click ảnh: icon_148x38_26450.png"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.7447,
+      0.413
+    ],
+    "repeat": 1,
+    "delay": 0.73,
+    "comment": "Tap [74%, 41%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.7447,
+      0.413
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [74%, 41%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.7447,
+      0.413
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [74%, 41%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.7447,
+      0.413
+    ],
+    "repeat": 1,
+    "delay": 0.24,
+    "comment": "Tap [74%, 41%]"
+  },
+  {
+    "action": "type_text",
+    "text": "{tk_user}",
+    "repeat": 1,
+    "delay": 0.5,
+    "comment": "Gõ: {tk_user}"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.7673,
+      0.4764
+    ],
+    "repeat": 1,
+    "delay": 1.2,
+    "comment": "Tap [76%, 47%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.7643,
+      0.4764
+    ],
+    "repeat": 1,
+    "delay": 0.22,
+    "comment": "Tap [76%, 47%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.7613,
+      0.4764
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [76%, 47%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.7613,
+      0.4764
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [76%, 47%]"
+  },
+  {
+    "action": "type_text",
+    "text": "{tk_pass}",
+    "repeat": 1,
+    "delay": 0.5,
+    "comment": "Gõ: {tk_pass}"
+  },
+  {
+    "action": "wait_image",
+    "template": "icon_148x38_26450.png",
+    "timeout": 8,
+    "conf": 0.8,
+    "click": true,
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Click ảnh: icon_148x38_26450.png"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.961,
+      0.0338
+    ],
+    "repeat": 1,
+    "delay": 0.76,
+    "comment": "Tap [96%, 3%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.961,
+      0.0329
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [96%, 3%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.961,
+      0.0329
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [96%, 3%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.961,
+      0.0329
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [96%, 3%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.961,
+      0.0329
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [96%, 3%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.961,
+      0.0329
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [96%, 3%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.961,
+      0.0329
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [96%, 3%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.961,
+      0.0329
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [96%, 3%]"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.961,
+      0.0329
+    ],
+    "repeat": 1,
+    "delay": 0.2,
+    "comment": "Tap [96%, 3%]"
+  },
+  {
+    "action": "wait_image",
+    "template": "icon_157x69_28133.png",
+    "timeout": 8,
+    "conf": 0.8,
+    "click": true,
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Click ảnh: icon_157x69_28133.png"
+  },
+  {
+    "action": "multi_image",
+    "templates": [
+      "icon_148x41_28378.png"
+    ],
+    "timeout": 10,
+    "conf": 0.8,
+    "click": true,
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Quét song song (1 ảnh)"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.251,
+      0.9449
+    ],
+    "repeat": 5,
+    "delay": 0.1,
+    "comment": "Tap",
+    "repeat_mode": "count"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.2314,
+      0.9626
+    ],
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Tap"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.2314,
+      0.9626
+    ],
+    "repeat": 5,
+    "delay": 1.0,
+    "comment": "Tap",
+    "repeat_mode": "count"
+  }
+]

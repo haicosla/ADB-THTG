@@ -1,5 +1,26 @@
 [
   {
+    "action": "tap",
+    "pos": [
+      0.0706,
+      0.9482
+    ],
+    "repeat": 5,
+    "delay": 0.2,
+    "comment": "Tap",
+    "repeat_mode": "count"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.2353,
+      0.9394
+    ],
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Tap"
+  },
+  {
     "action": "wait_image",
     "template": "icon_100x100_18866.png",
     "timeout": 8,
@@ -7,7 +28,8 @@
     "click": true,
     "repeat": 1,
     "delay": 1.0,
-    "comment": "Click ảnh: icon_100x100_18866.png"
+    "comment": "Click ảnh: icon_100x100_18866.png",
+    "repeat_mode": "count"
   },
   {
     "action": "wait_image",
@@ -28,5 +50,46 @@
     "repeat": 1,
     "delay": 1.0,
     "comment": "Click ảnh: icon_100x100_18927.png"
+  },
+  {
+    "action": "wait_image",
+    "template": "icon_193x500_67082.png",
+    "timeout": 120,
+    "conf": 0.8,
+    "click": true,
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Click ảnh: icon_193x500_67082.png"
+  },
+  {
+    "action": "wait_image",
+    "template": "icon_193x500_67082.png",
+    "timeout": 120,
+    "conf": 0.8,
+    "click": true,
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Click ảnh: icon_193x500_67082.png"
+  },
+  {
+    "action": "wait_image",
+    "template": "icon_193x500_67082.png",
+    "timeout": 120,
+    "conf": 0.8,
+    "click": true,
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Click ảnh: icon_193x500_67082.png"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.0667,
+      0.946
+    ],
+    "repeat": 5,
+    "delay": 0.3,
+    "comment": "Tap",
+    "repeat_mode": "count"
   }
 ]

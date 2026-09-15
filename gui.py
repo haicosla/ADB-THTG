@@ -18,6 +18,12 @@ import capture_tools
 import task_registry
 
 
+def _bind_esc_close(win):
+    """Cho phép bấm phím ESC để đóng nhanh 1 cửa sổ popup (Toplevel), thay
+    vì bắt buộc phải rê chuột tới nút X/Đóng."""
+    win.bind("<Escape>", lambda e: win.destroy())
+
+
 def parse_condition_string(raw_text):
     if not raw_text:
         return None, None, None
@@ -404,6 +410,7 @@ class MacroStudioApp:
         self.rect_id = None
         self.pending_action = None
         self._ocr_edit_idx = None
+        self._region_edit_idx = None
 
         self.is_playing = False
         self.stop_flag = False
@@ -558,6 +565,11 @@ class MacroStudioApp:
         self.spin_all_conf = ttk.Spinbox(f_batch, from_=0.5, to=0.99, increment=0.05, width=5)
         self.spin_all_conf.set(0.80)
         self.spin_all_conf.pack(side="left", padx=2)
+
+        ttk.Label(f_batch, text="Tốc độ quét (s):").pack(side="left", padx=6)
+        self.spin_all_scan = ttk.Spinbox(f_batch, from_=0.02, to=2.0, increment=0.02, width=5)
+        self.spin_all_scan.set(0.10)
+        self.spin_all_scan.pack(side="left", padx=2)
 
         ttk.Button(f_batch, text="⚡ ÁP DỤNG CHO TẤT CẢ BƯỚC ẢNH", command=self.apply_batch_image_settings).pack(side="left", padx=8)
 
@@ -823,6 +835,14 @@ class MacroStudioApp:
                              command=lambda: self._edit_step_field(idx, "conf"))
             menu.add_command(label=f"⏳ Sửa Timeout ({step.get('timeout', 8)}s)", 
                              command=lambda: self._edit_step_field(idx, "timeout"))
+            menu.add_command(label=f"⚡ Sửa Tốc Độ Quét ({step.get('scan_interval', 0.1)}s)",
+                             command=lambda: self._edit_step_field(idx, "scan_interval"))
+            region_txt = "đã đặt" if step.get("region") else "toàn màn hình"
+            menu.add_command(label=f"📐 Chọn Vùng Quét ({region_txt})",
+                             command=lambda: self._arm_region_recapture(idx))
+            if step.get("region"):
+                menu.add_command(label="🗑 Bỏ Vùng Quét (quét lại toàn màn hình)",
+                                 command=lambda: self._clear_step_region(idx))
             # BUG CŨ: điều kiện chỉ kiểm tra "template" (số ít), nhưng if_image
             # (nhóm ảnh) và multi_image (quét đa ảnh) lưu ảnh ở "templates"
             # (số nhiều, list) -> menu đổi ảnh không bao giờ hiện ra cho 2 loại
@@ -915,6 +935,16 @@ class MacroStudioApp:
             new_val = simpledialog.askinteger("Sửa Timeout", "Thời gian chờ tối đa (giây):", initialvalue=step.get("timeout", 8), minvalue=1, maxvalue=120)
             if new_val is not None:
                 step["timeout"] = new_val
+        elif field_type == "scan_interval":
+            new_val = simpledialog.askfloat(
+                "Sửa Tốc Độ Quét",
+                "Khoảng nghỉ giữa 2 lần quét ảnh liên tiếp (giây).\n"
+                "Càng NHỎ quét càng NHANH (bắt được cả ảnh chỉ hiện rất ngắn)\n"
+                "nhưng tốn CPU hơn. Khuyên dùng 0.05 - 0.15:",
+                initialvalue=step.get("scan_interval", 0.1), minvalue=0.02, maxvalue=2.0
+            )
+            if new_val is not None:
+                step["scan_interval"] = round(new_val, 2)
         elif field_type == "set_var_params":
             existing = self._get_existing_variable_names()
             dlg = SetVarDialog(self.root, existing_vars=existing, initial_var=step.get("var", "a"), initial_val=step.get("value", 0))
@@ -1011,6 +1041,7 @@ class MacroStudioApp:
         top.title("Quản Lý Ảnh Trong Nhóm")
         top.transient(self.root)
         top.grab_set()
+        _bind_esc_close(top)
 
         # Giữ tham chiếu PhotoImage ở đây, không thì bị Python dọn rác mất
         # ảnh ngay sau khi render_rows() return (lỗi kinh điển của Tkinter).
@@ -1121,6 +1152,7 @@ class MacroStudioApp:
         "tap": "🖱️ Bấm 1 điểm trên Preview để chọn tọa độ Tap...",
         "swipe": "🖱️ Kéo từ điểm đầu đến điểm cuối trên Preview để tạo Vuốt...",
         "ocr_text": "🖱️ Kéo khung trên Preview để chọn VÙNG cần quét chữ (OCR)...",
+        "image_region": "🖱️ Kéo khung trên Preview để GIỚI HẠN vùng quét ảnh cho bước này...",
     }
 
     def _arm_capture(self, kind):
@@ -1133,6 +1165,7 @@ class MacroStudioApp:
 
     def _cancel_pending_action(self):
         self._ocr_edit_idx = None
+        self._region_edit_idx = None
         self.pending_action = None
         self.lbl_capture_hint.config(text="")
         self.btn_cancel_capture.pack_forget()
@@ -1175,6 +1208,24 @@ class MacroStudioApp:
         """Chọn lại vùng quét OCR cho 1 bước ocr_text đã có sẵn."""
         self._ocr_edit_idx = idx
         self._arm_capture("ocr_text")
+
+    def _arm_region_recapture(self, idx):
+        """Chọn (hoặc chọn lại) VÙNG QUÉT giới hạn cho 1 bước tìm ảnh
+        (wait_image/if_image/multi_image) đã có sẵn. Khi đã đặt, mỗi lần
+        quét chỉ so khớp TRONG vùng này thay vì toàn màn hình - nhanh hơn
+        nhiều lần vì matchTemplate tốn CPU theo diện tích ảnh đem so khớp,
+        mà vẫn GIỮ NGUYÊN độ phân giải gốc (không đánh đổi độ chính xác như
+        cách thu nhỏ ảnh). Hữu ích khi đã biết trước icon/ảnh cần tìm luôn
+        nằm trong 1 khu vực cố định (vd góc trên-phải, thanh dưới cùng...)."""
+        self._region_edit_idx = idx
+        self._arm_capture("image_region")
+
+    def _clear_step_region(self, idx):
+        """Bỏ vùng quét đã đặt cho 1 bước - trở lại quét TOÀN màn hình."""
+        if 0 <= idx < len(self.steps):
+            self.steps[idx].pop("region", None)
+            self.refresh_tree()
+            self.tree.selection_set(str(idx))
 
     def add_manual_popup(self):
         msg = simpledialog.askstring(
@@ -1409,6 +1460,7 @@ class MacroStudioApp:
         if getattr(self, "active_inspect_path", None) and os.path.exists(self.active_inspect_path):
             top = tk.Toplevel(self.root)
             top.title(os.path.basename(self.active_inspect_path))
+            _bind_esc_close(top)
             img = Image.open(self.active_inspect_path)
             photo = ImageTk.PhotoImage(img)
             lbl = tk.Label(top, image=photo)
@@ -1645,7 +1697,7 @@ class MacroStudioApp:
         if self.rect_id:
             self.canvas.delete(self.rect_id)
             self.rect_id = None
-        if (self.pending_action in ("wait_image", "if_image", "ocr_text")) or (self.pending_action is None and "crop" in self.preview_action_mode.get()):
+        if (self.pending_action in ("wait_image", "if_image", "ocr_text", "image_region")) or (self.pending_action is None and "crop" in self.preview_action_mode.get()):
             self.rect_id = self.canvas.create_rectangle(event.x - half_w, event.y - half_h, event.x + half_w, event.y + half_h, outline="#00ff00", width=2)
 
     def on_canvas_drag(self, event):
@@ -1686,6 +1738,23 @@ class MacroStudioApp:
                 self._do_crop_custom(cached_screen, x1, y1, x2, y2, trigger_tap=(self.pending_action == "wait_image"), kind=self.pending_action)
             else:
                 self._do_crop(cached_screen, int(x1 / self.preview_scale), int(y1 / self.preview_scale), rx1, ry1, trigger_tap=(self.pending_action == "wait_image"), kind=self.pending_action)
+            self._cancel_pending_action()
+            return
+        elif self.pending_action == "image_region":
+            # Vùng quét (region) lưu theo TỌA ĐỘ TỈ LỆ (0..1) trên toàn màn
+            # hình, y hệt cách lưu box của ocr_text - matchTemplate của bước
+            # ảnh này sẽ CHỈ so khớp trong vùng này thay vì toàn màn hình.
+            nx1, ny1 = sorted((rx1, rx2))[0], sorted((ry1, ry2))[0]
+            nx2, ny2 = sorted((rx1, rx2))[1], sorted((ry1, ry2))[1]
+            if nx2 - nx1 < 0.02 or ny2 - ny1 < 0.02:
+                messagebox.showwarning("Lưu ý", "Hãy KÉO một khung đủ lớn làm vùng quét!")
+                self._cancel_pending_action()
+                return
+            edit_idx = self._region_edit_idx
+            if edit_idx is not None and 0 <= edit_idx < len(self.steps):
+                self.steps[edit_idx]["region"] = [nx1, ny1, nx2, ny2]
+                self.refresh_tree()
+                self.tree.selection_set(str(edit_idx))
             self._cancel_pending_action()
             return
         elif self.pending_action == "ocr_text":
@@ -1782,6 +1851,7 @@ class MacroStudioApp:
         try:
             new_timeout = int(self.spin_all_timeout.get())
             new_conf = round(float(self.spin_all_conf.get()), 2)
+            new_scan = round(float(self.spin_all_scan.get()), 2)
         except ValueError:
             messagebox.showerror("Lỗi", "Thông số không hợp lệ!")
             return
@@ -1790,6 +1860,7 @@ class MacroStudioApp:
             if step.get("action") in ("wait_image", "if_image", "multi_image"):
                 step["timeout"] = new_timeout
                 step["conf"] = new_conf
+                step["scan_interval"] = new_scan
                 count += 1
         self.refresh_tree()
         messagebox.showinfo("Thành công", f"Đã áp dụng cho {count} bước ảnh!")

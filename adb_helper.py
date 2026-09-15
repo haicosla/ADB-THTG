@@ -12,9 +12,27 @@ except ImportError:
     pytesseract = None
     _HAS_PYTESSERACT_LIB = False
 
+
+def _project_root_dir():
+    """Thư mục CHA (1 cấp trên) của thư mục chứa file .py này (nơi main.py và
+    các module khác đang nằm) - dùng làm nơi ƯU TIÊN dò sẵn adb.exe /
+    tesseract.exe nếu người dùng mang theo bản portable đóng gói CÙNG dự án
+    (đặt cạnh thư mục mã nguồn), thay vì chỉ trông chờ vào việc cài đặt hệ
+    thống hoặc các đường dẫn ổ đĩa cố định (vd C:\\leidian...) vốn không đúng
+    trên mọi máy (xem PROJECT_CONTEXT.md - máy này cài LDPlayer ở H:\\)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(here)
+
+
 # Các đường dẫn cài đặt Tesseract-OCR phổ biến trên Windows - thử lần lượt
-# trước khi trông chờ vào PATH hệ thống.
+# trước khi trông chờ vào PATH hệ thống. Ưu tiên bản portable đặt sẵn ở
+# THƯ MỤC CHA của dự án (xem _project_root_dir) TRƯỚC các đường dẫn cài đặt
+# hệ thống cố định bên dưới, vì đây là nơi người dùng CHỦ ĐỘNG đặt sẵn cho
+# đúng máy này, không phụ thuộc ổ đĩa/tên thư mục cài đặt mặc định.
 _TESSERACT_CANDIDATE_PATHS = [
+    os.path.join(_project_root_dir(), "tesseract.exe"),
+    os.path.join(_project_root_dir(), "Tesseract-OCR", "tesseract.exe"),
+    os.path.join(_project_root_dir(), "tesseract", "tesseract.exe"),
     r"C:\Program Files\Tesseract-OCR\tesseract.exe",
     r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
 ]
@@ -61,6 +79,23 @@ class ADBHelper:
         self._sdk_version = None
 
     def detect_adb(self):
+        # 1) ƯU TIÊN CAO NHẤT: bản adb.exe mang theo CÙNG dự án, đặt ở THƯ
+        # MỤC CHA (1 cấp trên thư mục chứa mã nguồn, vd .../MyApp/adb_helper.py
+        # thì tìm ở .../adb.exe, .../adb/adb.exe hoặc .../platform-tools/adb.exe).
+        # Đây là đường dẫn NGƯỜI DÙNG TỰ ĐẶT SẴN cho đúng máy này nên đáng tin
+        # cậy hơn cả việc dò tiến trình lẫn các đường dẫn ổ đĩa cố định bên
+        # dưới (trước đây chỉ dò C:\leidian / D:\leidian - máy nào cài
+        # LDPlayer ở ổ khác, vd H:\LDPlayer như PROJECT_CONTEXT.md, sẽ không
+        # tìm thấy gì và rơi về "adb" trần trơ, lỗi ngay nếu adb không có
+        # trong PATH hệ thống).
+        root_dir = _project_root_dir()
+        for rel in ("adb.exe", os.path.join("adb", "adb.exe"), os.path.join("platform-tools", "adb.exe")):
+            candidate = os.path.join(root_dir, rel)
+            if os.path.exists(candidate):
+                return candidate
+
+        # 2) Dò qua tiến trình dnplayer.exe ĐANG CHẠY (chắc chắn đúng bản
+        # LDPlayer thật sự đang dùng trên máy, nếu giả lập đã mở sẵn).
         for proc in psutil.process_iter(['name', 'exe']):
             try:
                 if proc.info['name'] and 'dnplayer.exe' in proc.info['name'].lower():
@@ -70,6 +105,9 @@ class ADBHelper:
                         return candidate
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
+
+        # 3) Vài đường dẫn cài đặt mặc định phổ biến (fallback cuối cùng - có
+        # thể sai trên máy cài ở ổ đĩa khác, xem mục 1 ở trên).
         for path in [r"C:\leidian\LDPlayer9\adb.exe", r"D:\leidian\LDPlayer9\adb.exe"]:
             if os.path.exists(path):
                 return path
@@ -173,6 +211,38 @@ class ADBHelper:
             ry = int(float(y))
         self.run_cmd(["shell", "input", "tap", str(rx), str(ry)])
 
+    def tap_fast(self, x, y):
+        """Giống tap() nhưng BẮN LỆNH ĐI NGAY (fire-and-forget), KHÔNG chờ
+        tiến trình adb.exe chạy xong hẳn rồi mới trả quyền điều khiển lại
+        cho code gọi - trong khi tap() thường dùng run_cmd() -> subprocess.
+        run() vốn LUÔN CHỜ tiến trình adb.exe kết nối, gửi lệnh, nhận phản
+        hồi rồi thoát hẳn mới thôi (an toàn, biết chắc lệnh đã chạy, nhưng
+        cộng thêm 1 khoảng round-trip mỗi lần gọi).
+
+        DÙNG RIÊNG cho bước "Tìm & Click 1 ảnh" (wait_image) NGAY SAU KHI
+        vừa phát hiện ảnh - đây là bước cần PHẢN XẠ NHANH NHẤT có thể vì ảnh
+        có thể chỉ hiện trên màn hình trong thời gian rất ngắn (vd 0.5s),
+        nên chấp nhận đánh đổi: không đợi xác nhận adb.exe đã thoát/có lỗi
+        gì hay không, miễn là lệnh tap được ĐẨY ĐI SỚM NHẤT có thể, để giảm
+        tối đa khoảng thời gian từ lúc script BIẾT đã thấy ảnh tới lúc thao
+        tác chạm THỰC SỰ được gửi đi. Các nơi khác (tap/swipe thủ công,
+        if_image, multi_image...) vẫn dùng tap() thường như cũ - không đổi
+        hành vi ở đó theo đúng yêu cầu chỉ tối ưu riêng cho tìm-và-click 1
+        ảnh."""
+        if 0.0 <= float(x) <= 1.0 and 0.0 <= float(y) <= 1.0:
+            rx = int(float(x) * self.screen_w)
+            ry = int(float(y) * self.screen_h)
+        else:
+            rx = int(float(x))
+            ry = int(float(y))
+        cmd = [self.adb_path]
+        if self.device_id:
+            cmd.extend(["-s", self.device_id])
+        cmd.extend(["shell", "input", "tap", str(rx), str(ry)])
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, startupinfo=startupinfo)
+
     def swipe(self, x1, y1, x2, y2, duration_ms=250):
         if 0.0 <= float(x1) <= 1.0 and 0.0 <= float(y1) <= 1.0:
             rx1 = int(float(x1) * self.screen_w)
@@ -203,30 +273,65 @@ class ADBHelper:
             self.screen_h, self.screen_w = img.shape[:2]
         return img
 
-    def find_image_on_screen(self, template_cv, threshold=0.80):
+    @staticmethod
+    def _to_gray(img):
+        return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+
+    @staticmethod
+    def _crop_region(screen, region):
+        """Cắt ảnh chụp màn hình theo VÙNG QUÉT (region) người dùng đã chọn
+        trên Preview - normalized [x1,y1,x2,y2] trong khoảng 0..1 tính theo
+        toàn bộ màn hình giả lập. Trả về (ảnh đã cắt, offset_x, offset_y)
+        theo PIXEL GỐC (dùng để cộng ngược lại khi quy đổi toạ độ click về
+        đúng vị trí trên TOÀN màn hình). region=None/không hợp lệ -> trả về
+        chính ảnh gốc, offset=(0,0) - tức quét TOÀN màn hình như trước.
+
+        ĐÂY LÀ CÁCH TĂNG TỐC CHÍNH thay cho việc thu nhỏ ảnh: chi phí
+        cv2.matchTemplate tỉ lệ với DIỆN TÍCH ảnh đem so khớp - giới hạn
+        đúng vùng cần tìm (thay vì quét cả màn hình) giúp nhanh hơn NHIỀU
+        LẦN mà vẫn giữ NGUYÊN độ phân giải gốc, không đánh đổi độ chính xác
+        như cách thu nhỏ ảnh trước đây."""
+        if not region or len(region) != 4:
+            return screen, 0, 0
+
+        h, w = screen.shape[:2]
+        x1 = max(0, min(w - 1, int(region[0] * w)))
+        y1 = max(0, min(h - 1, int(region[1] * h)))
+        x2 = max(x1 + 1, min(w, int(round(region[2] * w))))
+        y2 = max(y1 + 1, min(h, int(round(region[3] * h))))
+        return screen[y1:y2, x1:x2], x1, y1
+
+    def find_image_on_screen(self, template_cv, threshold=0.80, region=None):
         screen = self.screencap_fast()
         if screen is None or template_cv is None:
             return None, 0.0
 
-        s_gray = cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY) if len(screen.shape) == 3 else screen
-        t_gray = cv2.cvtColor(template_cv, cv2.COLOR_BGR2GRAY) if len(template_cv.shape) == 3 else template_cv
+        search_img, off_x, off_y = self._crop_region(screen, region)
+        s_gray = self._to_gray(search_img)
+        t_gray = self._to_gray(template_cv)
+
+        if s_gray.shape[0] < t_gray.shape[0] or s_gray.shape[1] < t_gray.shape[1]:
+            # Vùng quét đã chọn nhỏ hơn cả ảnh mẫu (vd chọn nhầm khung quá bé)
+            # -> không thể so khớp, coi như không thấy thay vì lỗi.
+            return None, 0.0
 
         res = cv2.matchTemplate(s_gray, t_gray, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, max_loc = cv2.minMaxLoc(res)
 
         if max_val >= threshold:
             h, w = t_gray.shape[:2]
-            cx = max_loc[0] + w // 2
-            cy = max_loc[1] + h // 2
+            cx = off_x + max_loc[0] + w // 2
+            cy = off_y + max_loc[1] + h // 2
             return (round(cx / self.screen_w, 4), round(cy / self.screen_h, 4)), max_val
         return None, max_val
 
-    def find_any_image_on_screen(self, templates_dict, threshold=0.80):
+    def find_any_image_on_screen(self, templates_dict, threshold=0.80, region=None):
         screen = self.screencap_fast()
         if screen is None:
             return None, None, 0.0
 
-        s_gray = cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY) if len(screen.shape) == 3 else screen
+        search_img, off_x, off_y = self._crop_region(screen, region)
+        s_gray = self._to_gray(search_img)
 
         best_name = None
         best_pos = None
@@ -235,15 +340,18 @@ class ADBHelper:
         for name, t_cv in templates_dict.items():
             if t_cv is None:
                 continue
-            t_gray = cv2.cvtColor(t_cv, cv2.COLOR_BGR2GRAY) if len(t_cv.shape) == 3 else t_cv
+            t_gray = self._to_gray(t_cv)
+            if s_gray.shape[0] < t_gray.shape[0] or s_gray.shape[1] < t_gray.shape[1]:
+                continue
+
             res = cv2.matchTemplate(s_gray, t_gray, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, max_loc = cv2.minMaxLoc(res)
 
             if max_val >= threshold and max_val > highest_score:
                 highest_score = max_val
                 h, w = t_gray.shape[:2]
-                cx = max_loc[0] + w // 2
-                cy = max_loc[1] + h // 2
+                cx = off_x + max_loc[0] + w // 2
+                cy = off_y + max_loc[1] + h // 2
                 best_name = name
                 best_pos = (round(cx / self.screen_w, 4), round(cy / self.screen_h, 4))
 

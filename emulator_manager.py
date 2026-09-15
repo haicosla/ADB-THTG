@@ -36,23 +36,29 @@ trên đều không có trong `adb devices` (vd giả lập vừa mở, adb chư
 """
 import os
 import re
+import time
 import subprocess
 import psutil
 
 
 class EmulatorInfo:
-    """Thông tin 1 giả lập LDPlayer đang chạy."""
-    __slots__ = ("index", "name", "hwnd", "adb_serial", "android_started")
+    """Thông tin 1 giả lập LDPlayer (có thể đang chạy hoặc đang tắt - xem
+    field `running`)."""
+    __slots__ = ("index", "name", "hwnd", "adb_serial", "android_started", "running")
 
-    def __init__(self, index, name, hwnd, adb_serial, android_started):
+    def __init__(self, index, name, hwnd, adb_serial, android_started, running=True):
         self.index = index
         self.name = name
         self.hwnd = hwnd
         self.adb_serial = adb_serial
         self.android_started = android_started
+        # running=True mặc định vì phần lớn nơi gọi cũ (refresh()) chỉ liệt
+        # kê giả lập ĐANG CHẠY - chỉ list_configured() mới có thể trả về
+        # running=False (giả lập đã tạo nhưng đang tắt).
+        self.running = running
 
     def __repr__(self):
-        return f"EmulatorInfo(index={self.index}, name={self.name!r}, serial={self.adb_serial})"
+        return f"EmulatorInfo(index={self.index}, name={self.name!r}, serial={self.adb_serial}, running={self.running})"
 
 
 def _hidden_startupinfo():
@@ -186,7 +192,7 @@ class EmulatorManager:
             result.append(EmulatorInfo(
                 index=index, name=name or f"Giả lập {index}",
                 hwnd=top_hwnd if top_hwnd > 0 else None,
-                adb_serial=serial, android_started=android_started
+                adb_serial=serial, android_started=android_started, running=True
             ))
 
         return result if result else self._list_via_adb_fallback()
@@ -200,9 +206,62 @@ class EmulatorManager:
         for i, serial in enumerate(self.adb.get_devices()):
             result.append(EmulatorInfo(
                 index=i, name=serial, hwnd=None,
-                adb_serial=serial, android_started=True
+                adb_serial=serial, android_started=True, running=True
             ))
         return result
+
+    # ---------------- LIỆT KÊ TẤT CẢ GIẢ LẬP ĐÃ CẤU HÌNH (kể cả đang TẮT) ----------------
+    def list_configured(self):
+        """Giống refresh() nhưng KHÔNG lọc bỏ giả lập đang tắt (pid <= 0) -
+        dùng cho tính năng "tự nhận diện bật/tắt rồi tự khởi động" (xem
+        ensure_running). refresh() vẫn giữ nguyên hành vi cũ (chỉ giả lập
+        đang chạy) vì đó là danh sách hiển thị cho người dùng TICK CHỌN ở
+        Dashboard - không nên hiện giả lập đang tắt vào đó."""
+        if not self.has_ldconsole():
+            return self._list_via_adb_fallback()
+        try:
+            proc = subprocess.run(
+                [self.ldconsole_path, "list2"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                startupinfo=_hidden_startupinfo(), timeout=8
+            )
+            out = proc.stdout.decode("utf-8", errors="ignore")
+        except Exception:
+            return self._list_via_adb_fallback()
+
+        emu_style, tcp_style = self._real_serials_by_index()
+        result = []
+        for line in out.splitlines():
+            parts = line.strip().split(",")
+            if len(parts) < 6:
+                continue
+            try:
+                index = int(parts[0])
+                name = parts[1]
+                top_hwnd = int(parts[2])
+                android_started = parts[4] == "1"
+                pid = int(parts[5])
+            except (ValueError, IndexError):
+                continue
+
+            guessed_serial = f"127.0.0.1:{5555 + index * 2}"
+            serial = self._resolve_real_serial(index, emu_style, tcp_style, guessed_serial)
+            result.append(EmulatorInfo(
+                index=index, name=name or f"Giả lập {index}",
+                hwnd=top_hwnd if top_hwnd > 0 else None,
+                adb_serial=serial, android_started=android_started,
+                running=(pid > 0)
+            ))
+        return result
+
+    def find_by_index(self, index):
+        """Tìm 1 giả lập theo index trong danh sách CẤU HÌNH ĐẦY ĐỦ (kể cả
+        đang tắt). Trả về None nếu không tìm thấy index này (vd đã bị xoá
+        khỏi LDMultiPlayer)."""
+        for e in self.list_configured():
+            if e.index == index:
+                return e
+        return None
 
     # ---------------- KẾT NỐI ADB ----------------
     def ensure_adb_connected(self, emulator):
@@ -230,3 +289,128 @@ class EmulatorManager:
             return "connected" in out or "already" in out
         except Exception:
             return False
+
+    # ---------------- BẬT / TẮT / KHỞI ĐỘNG LẠI GIẢ LẬP ----------------
+    def launch(self, index):
+        """Bật giả lập tại `index` qua `ldconsole.exe launch --index N`.
+        Lệnh này TRẢ VỀ NGAY (không chờ Android boot xong) - phải gọi
+        wait_until_ready() sau đó để biết khi nào thật sự dùng được.
+        Trả về (thành_công: bool, thông_báo: str)."""
+        if not self.has_ldconsole():
+            return False, "Không tìm thấy ldconsole.exe trên máy này."
+        try:
+            proc = subprocess.run(
+                [self.ldconsole_path, "launch", "--index", str(index)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                startupinfo=_hidden_startupinfo(), timeout=10
+            )
+            msg = proc.stdout.decode("utf-8", errors="ignore").strip()
+            return True, msg
+        except Exception as e:
+            return False, str(e)
+
+    def quit_emulator(self, index):
+        """Tắt giả lập tại `index` qua `ldconsole.exe quit --index N`."""
+        if not self.has_ldconsole():
+            return False, "Không tìm thấy ldconsole.exe trên máy này."
+        try:
+            proc = subprocess.run(
+                [self.ldconsole_path, "quit", "--index", str(index)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                startupinfo=_hidden_startupinfo(), timeout=10
+            )
+            return True, proc.stdout.decode("utf-8", errors="ignore").strip()
+        except Exception as e:
+            return False, str(e)
+
+    def reboot(self, index):
+        """Khởi động lại giả lập tại `index` qua `ldconsole.exe reboot --index N`."""
+        if not self.has_ldconsole():
+            return False, "Không tìm thấy ldconsole.exe trên máy này."
+        try:
+            proc = subprocess.run(
+                [self.ldconsole_path, "reboot", "--index", str(index)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                startupinfo=_hidden_startupinfo(), timeout=10
+            )
+            return True, proc.stdout.decode("utf-8", errors="ignore").strip()
+        except Exception as e:
+            return False, str(e)
+
+    def _boot_completed(self, serial):
+        """Kiểm tra Android bên trong giả lập đã boot xong thật sự chưa
+        (không chỉ là tiến trình LDPlayer đã chạy) - tránh trường hợp bắt
+        đầu chạm/gõ chữ khi hệ thống Android còn đang khởi động dở."""
+        try:
+            proc = subprocess.run(
+                [self.adb.adb_path, "-s", serial, "shell", "getprop", "sys.boot_completed"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                startupinfo=_hidden_startupinfo(), timeout=6
+            )
+            return proc.stdout.decode("utf-8", errors="ignore").strip() == "1"
+        except Exception:
+            return False
+
+    def wait_until_ready(self, index, timeout=90, poll_interval=2, on_wait=None):
+        """Chờ tới khi giả lập tại `index` THẬT SỰ sẵn sàng nhận lệnh ADB:
+        1) Tiến trình LDPlayer đã chạy (pid > 0, qua list_configured()).
+        2) Có serial ADB thật trong `adb devices` (ensure_adb_connected).
+        3) Android đã boot xong (sys.boot_completed == '1').
+
+        `on_wait` (nếu có) được gọi mỗi vòng chờ - dùng để ghi log/tiến độ
+        ra Dashboard trong lúc chờ mà không cần đoán trước sẽ mất bao lâu.
+
+        Trả về EmulatorInfo nếu sẵn sàng trong thời gian timeout (giây),
+        ngược lại trả về None."""
+        start = time.time()
+        while time.time() - start < timeout:
+            info = self.find_by_index(index)
+            if info and info.running:
+                if self.ensure_adb_connected(info) and self._boot_completed(info.adb_serial):
+                    return info
+            if on_wait:
+                try:
+                    on_wait()
+                except Exception:
+                    pass
+            time.sleep(poll_interval)
+        return None
+
+    def ensure_running(self, index, timeout=90, on_log=None):
+        """Đảm bảo giả lập tại `index` ĐANG BẬT VÀ SẴN SÀNG dùng được ngay:
+        - Nếu đang chạy sẵn và đã boot xong -> trả về luôn, không làm gì thêm.
+        - Nếu đang TẮT (hoặc chưa boot xong) -> tự gọi launch() rồi chờ tới
+          khi sẵn sàng (tối đa `timeout` giây).
+
+        `on_log(level, message)` (tuỳ chọn) dùng để báo tiến độ ra Dashboard.
+
+        Trả về (EmulatorInfo, đã_tự_khởi_động: bool) khi thành công, hoặc
+        (None, False) nếu không thể bật được / chờ quá lâu."""
+        def _log(level, msg):
+            if on_log:
+                try:
+                    on_log(level, msg)
+                except Exception:
+                    pass
+
+        info = self.find_by_index(index)
+        if info and info.running and self.ensure_adb_connected(info) and self._boot_completed(info.adb_serial):
+            return info, False
+
+        if info is None:
+            _log("error", f"Không tìm thấy giả lập nào có index #{index} trong LDPlayer (có thể đã bị xoá).")
+            return None, False
+
+        _log("info", f"Giả lập '{info.name}' (#{index}) đang TẮT hoặc chưa sẵn sàng - đang tự khởi động...")
+        ok, msg = self.launch(index)
+        if not ok:
+            _log("error", f"Không khởi động được giả lập '{info.name}' (#{index}): {msg}")
+            return None, False
+
+        ready = self.wait_until_ready(index, timeout=timeout)
+        if not ready:
+            _log("error", f"Giả lập '{info.name}' (#{index}) khởi động quá lâu (>{timeout}s) - bỏ qua.")
+            return None, False
+
+        _log("success", f"Giả lập '{ready.name}' (#{index}) đã bật xong và sẵn sàng.")
+        return ready, True

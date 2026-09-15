@@ -1,0 +1,37 @@
+[
+  {
+    "id": "lich_f6bd4835",
+    "ten": "a",
+    "gio_hen": "14:44",
+    "interval_hours": 24.0,
+    "hoat_dong_ids": [
+      "like hội"
+    ],
+    "bat": true,
+    "lan_chay_ngay": "2026-09-14",
+    "lan_chay_luc": "2026-09-14T14:48:18",
+    "gan_may_tk": {
+      "0": [
+        "tk_a46ffc15"
+      ]
+    }
+  },
+  {
+    "id": "lich_abb5f2d6",
+    "ten": "Lịch mới",
+    "gio_hen": "14:25",
+    "interval_hours": 24.0,
+    "hoat_dong_ids": [
+      "Đá gà"
+    ],
+    "gan_may_tk": {
+      "0": [
+        "tk_05",
+        "tk_06"
+      ]
+    },
+    "bat": true,
+    "lan_chay_ngay": "2026-09-14",
+    "lan_chay_luc": "2026-09-14T14:25:18"
+  }
+]

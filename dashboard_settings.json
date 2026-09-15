@@ -1,6 +1,11 @@
 {
   "auto_login": false,
+  "account_rotate": false,
+  "shutdown_after": false,
+  "post_login_after": true,
+  "post_login_account_id": "tk_01",
   "shop_settings": {
     "1": false
-  }
+  },
+  "ldconsole_path": "H:\\LDPlayer\\LDPlayer9\\ldconsole.exe"
 }

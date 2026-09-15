@@ -1,0 +1,76 @@
+[
+  {
+    "action": "tap",
+    "pos": [
+      0.0804,
+      0.9504
+    ],
+    "repeat": 5,
+    "delay": 0.2,
+    "comment": "Tap",
+    "repeat_mode": "count"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.251,
+      0.946
+    ],
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Tap"
+  },
+  {
+    "action": "multi_image",
+    "templates": [
+      "icon_72x84_7547.png",
+      "icon_100x100_48315.png"
+    ],
+    "timeout": 8,
+    "conf": 0.8,
+    "click": true,
+    "repeat": 1,
+    "delay": 1.0,
+    "comment": "Quét song song (2 ảnh)"
+  },
+  {
+    "action": "tap",
+    "pos": [
+      0.1647,
+      0.8722
+    ],
+    "repeat": 1,
+    "delay": 2.0,
+    "comment": "Tap"
+  },
+  {
+    "action": "swipe",
+    "from": [
+      0.4905,
+      0.4061
+    ],
+    "to": [
+      0.8606,
+      0.41
+    ],
+    "duration": 700,
+    "repeat": 1,
+    "delay": 1.03,
+    "comment": "Swipe [49%]->[86%]"
+  },
+  {
+    "action": "swipe",
+    "from": [
+      0.4871,
+      0.5397
+    ],
+    "to": [
+      0.7745,
+      0.5465
+    ],
+    "duration": 720,
+    "repeat": 1,
+    "delay": 1.02,
+    "comment": "Swipe [48%]->[77%]"
+  }
+]

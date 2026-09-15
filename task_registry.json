@@ -14,5 +14,21 @@
     "thu_tu": 1,
     "mac_dinh_bat": true,
     "file_json": "C:/Users/HL2020/Desktop/LD/TiemTapHoa_OperationRecorder_V1/files 10/tasks/like hội.json"
+  },
+  {
+    "id": "account_login",
+    "ten_hien_thi": "Account Login",
+    "muc": "Hệ thống",
+    "thu_tu": 1,
+    "mac_dinh_bat": true,
+    "file_json": "C:/Users/HL2020/Desktop/LD/THTG ADB/tasks/account_login.json"
+  },
+  {
+    "id": "account_logout",
+    "ten_hien_thi": "Account Logout",
+    "muc": "Hệ thống",
+    "thu_tu": 2,
+    "mac_dinh_bat": true,
+    "file_json": "C:/Users/HL2020/Desktop/LD/THTG ADB/tasks/account_logout.json"
   }
 ]

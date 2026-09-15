@@ -32,6 +32,23 @@ def _get_repeat_ms(step):
     return float(step.get("repeat_seconds", 0)) * 1000.0
 
 
+def _get_scan_interval(step, default=0.1):
+    """Đọc TỐC ĐỘ QUÉT (khoảng nghỉ giữa 2 lần chụp+so khớp ảnh liên tiếp,
+    đơn vị giây) từ field 'scan_interval' của bước wait_image/if_image/
+    multi_image - do người dùng tự đặt trong GUI (mặc định 0.1s nếu chưa
+    từng đặt, để tương thích ngược với các kịch bản JSON cũ chưa có field
+    này). Đặt càng NHỎ thì quét càng NHANH (bắt được cả ảnh chỉ hiện rất
+    ngắn) nhưng tốn CPU hơn vì lặp lại chụp màn hình+so khớp nhiều hơn -
+    kẹp trong khoảng [0.02, 2.0]s để tránh người dùng lỡ tay đặt giá trị vô
+    lý (0 hoặc âm sẽ quay vòng liên tục ngốn CPU không cần thiết, quá lớn
+    thì lại dễ bỏ lỡ ảnh ngắn)."""
+    try:
+        val = float(step.get("scan_interval", default))
+    except (TypeError, ValueError):
+        val = default
+    return max(0.02, min(2.0, val))
+
+
 class LogicEngine:
     def __init__(self, adb_helper, stop_checker=None, step_notifier=None, popup_notifier=None, logger=None):
         self.adb = adb_helper
@@ -147,6 +164,8 @@ class LogicEngine:
         """Kiểm tra điều kiện xuất hiện của ảnh đơn hoặc danh sách ảnh"""
         timeout = step.get("timeout", 2)
         conf = step.get("conf", 0.80)
+        region = step.get("region")
+        scan_interval = _get_scan_interval(step)
         start = time.time()
 
         templates = step.get("templates")
@@ -160,20 +179,23 @@ class LogicEngine:
                     tpl_dict[fname] = cv2.imdecode(np.fromfile(p, dtype=np.uint8), cv2.IMREAD_COLOR)
 
             while time.time() - start < timeout and not self.stop_checker():
-                _, hit_pos, _ = self.adb.find_any_image_on_screen(tpl_dict, threshold=conf)
+                _, hit_pos, _ = self.adb.find_any_image_on_screen(tpl_dict, threshold=conf, region=region)
                 if hit_pos:
                     return True
-                time.sleep(0.2)
+                # Bản thân chụp màn hình + so khớp đã tốn thời gian, sleep
+                # thêm chỉ cần đủ để không "quay vòng" liên tục ngốn CPU -
+                # tốc độ quét (scan_interval) do người dùng tự đặt trong GUI.
+                time.sleep(scan_interval)
 
         elif single_tpl:
             tpl_path = os.path.join("templates", single_tpl)
             if os.path.exists(tpl_path):
                 tpl = cv2.imdecode(np.fromfile(tpl_path, dtype=np.uint8), cv2.IMREAD_COLOR)
                 while time.time() - start < timeout and not self.stop_checker():
-                    coord, _ = self.adb.find_image_on_screen(tpl, threshold=conf)
+                    coord, _ = self.adb.find_image_on_screen(tpl, threshold=conf, region=region)
                     if coord:
                         return True
-                    time.sleep(0.2)
+                    time.sleep(scan_interval)
 
         return False
 
@@ -302,18 +324,25 @@ class LogicEngine:
                             start = time.time()
                             timeout = s.get("timeout", 8)
                             conf = s.get("conf", 0.80)
+                            region = s.get("region")
+                            scan_interval = _get_scan_interval(s)
                             found = False
                             while time.time() - start < timeout and not self.stop_checker():
-                                coord, score = self.adb.find_image_on_screen(tpl, threshold=conf)
+                                coord, score = self.adb.find_image_on_screen(tpl, threshold=conf, region=region)
                                 if coord:
                                     found = True
                                     if s.get("click", True):
-                                        self.adb.tap(coord[0], coord[1])
+                                        # tap_fast: bắn lệnh click NGAY, không chờ
+                                        # adb.exe thoát hẳn - giảm độ trễ giữa lúc
+                                        # VỪA thấy ảnh và lúc CLICK thật sự được gửi
+                                        # đi (chỉ áp dụng riêng cho wait_image theo
+                                        # yêu cầu, các bước ảnh khác giữ nguyên tap()).
+                                        self.adb.tap_fast(coord[0], coord[1])
                                         self._log("success", f"Thấy ảnh '{tpl_name}' (khớp {score:.2f}) -> đã click {coord}")
                                     else:
                                         self._log("success", f"Thấy ảnh '{tpl_name}' (khớp {score:.2f})")
                                     break
-                                time.sleep(0.3)
+                                time.sleep(scan_interval)
                             if not found:
                                 self._log("warn", f"KHÔNG thấy ảnh '{tpl_name}' sau {timeout}s")
                         else:
@@ -329,9 +358,11 @@ class LogicEngine:
                         start = time.time()
                         timeout = s.get("timeout", 8)
                         conf = s.get("conf", 0.80)
+                        region = s.get("region")
+                        scan_interval = _get_scan_interval(s)
                         found_name = None
                         while time.time() - start < timeout and not self.stop_checker():
-                            hit_name, hit_pos, score = self.adb.find_any_image_on_screen(tpl_dict, threshold=conf)
+                            hit_name, hit_pos, score = self.adb.find_any_image_on_screen(tpl_dict, threshold=conf, region=region)
                             if hit_pos:
                                 found_name = hit_name
                                 if s.get("click", True):
@@ -340,7 +371,7 @@ class LogicEngine:
                                 else:
                                     self._log("success", f"Quét đa ảnh: thấy '{hit_name}' (khớp {score:.2f})")
                                 break
-                            time.sleep(0.3)
+                            time.sleep(scan_interval)
                         if not found_name:
                             self._log("warn", f"Quét đa ảnh: KHÔNG thấy ảnh nào trong nhóm sau {timeout}s")
 
