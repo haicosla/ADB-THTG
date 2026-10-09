@@ -309,6 +309,7 @@ def _merge_pass(balls, eps):
 
 
 R_NOM = R_FRAC   # tỉ lệ bán kính các cấp (dùng để suy ra bán kính con mới)
+LEVEL_PROB = {1: 0.31, 2: 0.28, 3: 0.28, 4: 0.14}   # tỉ lệ con thả theo cấp (đếm từ log thật) - trọng số khi nhìn trước con kế
 
 
 def simulate(balls, W, H, drop=None, p=None):
@@ -404,13 +405,21 @@ class EvalParams:
         self.safe_line = 0.25
         self.w_flat = 800.0       # phạt bề mặt đống heo gồ ghề (cột cao hẹp sát tường): x độ lệch chuẩn chiều cao các cột / H
         self.w_l10 = 3000.0       # thưởng mỗi con cấp cao nhất (L10) đang nằm trên bàn
-        self.w_count = 0.0        # phạt MỖI con heo còn trên bàn (thử 40/100 không khác biệt) ; 0 = tắt
+        self.w_count = 60.0       # phạt MỖI con heo còn trên bàn: mỗi lần gộp (kể cả L1+L1) bớt 1 con = +60 điểm -> gộp heo nhỏ thay vì để rải rác ; 0 = tắt
         self.w_corner = 0.0      # thưởng con TO NHẤT nằm sát góc (khe giữa nó và tường góc càng nhỏ càng tốt)
         self.w_inv = 0.0          # phạt "đảo thứ tự": con to hơn nằm XA góc hơn con nhỏ hơn (muốn dốc giảm dần từ góc ra), x chênh cấp
         self.w_buried = 0.0       # phạt heo nhỏ (cấp<=3) bị heo khác đè lên phía trên (thả từ trên xuống không còn tới được), x 2^cấp
         self.w_dup = 0.0          # phạt thừa heo cùng cấp không chạm nhau (>2 con) - chiếm chỗ, x 2^cấp
         self.corner_side = "auto"  # "left" / "right" / "auto" (auto = phía tường gần con to nhất)
         self.danger_line = 0.10   # mép trên heo cao hơn (tỉ lệ H) mà thấp hơn mức này thì phạt nặng
+        # --- đợt 2026-10-09: ưu tiên SỐNG + dọn heo nhỏ cho gọn bàn ---
+        self.w_lose = 1e6         # phạt THUA cứng: mép trên heo (sau khi gộp nở xong) cao hơn lose_margin*H -> coi như thua, gần như loại nước đó (0 = tắt)
+        self.lose_margin = 0.02   # tỉ lệ H: mép trên thấp hơn mức này (tính từ đỉnh khung) là thua (chừa ~16px cho sai số nhận diện/mô phỏng)
+        self.next_weighted = True # nhìn trước con kế: trung bình có TRỌNG SỐ theo tỉ lệ con thả thật (L1 31%, L2 28%, L3 28%, L4 14%), không phải trung bình đều
+        self.w_small_cnt = 0.0    # phạt MỖI heo nhỏ (cấp <= small_max) còn trên bàn: ép gộp heo nhỏ (nhất là L1) thay vì để rải rác chiếm chỗ ; 0 = tắt
+        self.small_max = 3
+        self.w_tower = 0.0        # phạt cột heo CAO vọt so với mặt đống (trung vị các cột) - tránh dựng tháp sát tường ; 0 = tắt
+        self.w_skyline = 3000.0   # phạt CHIỀU CAO TRUNG BÌNH của mặt đống (x tỉ lệ H): heo nhỏ chui vào chỗ trũng thay vì chất lên đỉnh -> bàn gọn, ít khe rỗng ; 0 = tắt
         for k, v in kw.items():
             setattr(self, k, v)
 
@@ -498,6 +507,42 @@ def surface_roughness(balls, W, H, nb=12):
     return math.sqrt(sum((h - m) ** 2 for h in hs) / nb) / H
 
 
+def _col_tops(balls, W, H, nb=12):
+    """Mép trên của đống heo tại nb cột đều nhau (y nhỏ = cao; cột trống = H)."""
+    hs = []
+    for c in range(nb):
+        x = (c + 0.5) * W / nb
+        top = H
+        for _, xc, yc, r in balls:
+            dx = abs(x - xc)
+            if dx < r:
+                top = min(top, yc - math.sqrt(r * r - dx * dx))
+        hs.append(top)
+    return hs
+
+
+def _tower_penalty(balls, W, H, ep, nb=12):
+    """Phạt cột heo cao vọt so với mặt đống (trung vị chiều cao 12 cột): tháp dựng sát tường không còn chỗ để heo lăn xuống/gộp."""
+    hs = _col_tops(balls, W, H, nb)
+    med = sorted(hs)[nb // 2]
+    return ep.w_tower * (max(0.0, med - min(hs)) / H) ** 2
+
+
+def _valley_xs(balls, W, H, nb=48, max_n=4):
+    """Tâm các chỗ TRŨNG của mặt đống (cột thấp hơn hẳn hai bên): vị trí thả ứng viên để heo nhỏ chui khe/lấp chỗ trống thay vì chất lên đỉnh."""
+    hs = _col_tops(balls, W, H, nb)
+    out = []
+    for i in range(nb):
+        lo_i, hi_i = max(0, i - 3), min(nb - 1, i + 3)
+        left_peak = min(hs[lo_i:i + 1])
+        right_peak = min(hs[i:hi_i + 1])
+        # valley: thấp (y lớn) hơn cả hai phía ít nhất 0.02H và là cực đại cục bộ của y
+        if hs[i] >= max(hs[max(0, i - 1)], hs[min(nb - 1, i + 1)]) and hs[i] - left_peak >= 0.02 * H and hs[i] - right_peak >= 0.02 * H and hs[i] < H - 1:
+            out.append((hs[i], (i + 0.5) * W / nb))
+    out.sort(key=lambda t: -t[0])
+    return [x for _, x in out[:max_n]]
+
+
 def evaluate(balls, gain, W, H, ep):
     sc = ep.w_gain * gain
     if not balls:
@@ -506,6 +551,15 @@ def evaluate(balls, gain, W, H, ep):
     top = min(y - r for _, _, y, r in balls)
     height = max(0.0, (H - top) / H)
     sc -= ep.w_height * height ** 3
+    if ep.w_lose > 0 and top < ep.lose_margin * H:
+        sc -= ep.w_lose * (1.0 + (ep.lose_margin * H - top) / H)       # THUA thật: heo chạm vạch trên -> không bao giờ chọn nếu còn nước khác
+    if ep.w_small_cnt > 0:
+        sc -= ep.w_small_cnt * sum(1 for b in balls if b[0] <= ep.small_max)
+    if ep.w_tower > 0:
+        sc -= _tower_penalty(balls, W, H, ep)
+    if ep.w_skyline > 0:
+        hs24 = _col_tops(balls, W, H, 24)
+        sc -= ep.w_skyline * sum(H - h for h in hs24) / (24.0 * H)
     if ep.reserve or ep.w_safe > 0:
         top = min(top, effective_top(balls, W))          # thua = heo chạm vạch trên: tính cả cú đẩy khi gộp nở ra
     if top < ep.danger_line * H:
@@ -654,7 +708,8 @@ def _block_wedge_penalty(balls, W, ep):
     return pen
 
 
-def choose_drop(balls, held, W, H, sp, ep, think_s=2.5, n_x=25, next_levels=(1, 2, 3, 4), topk=6, log=None, held_top=None, y0_fixed=None):
+def choose_drop(balls, held, W, H, sp, ep, think_s=2.5, n_x=25, next_levels=(1, 2, 3, 4), topk=6, log=None, held_top=None, y0_fixed=None,
+                valleys=True, refine=True):
     """Trả (x_trong_khung, thông tin). held=(lv,r). held_top: mép trên con cầm cách mép trên khung (x W) -> heo rơi từ ĐÚNG độ cao
     thật (mặc định HELD_TOP) thay vì ngay sát mép khung (rơi từ cao hơn thì chạm sàn/heo mạnh hơn, lăn xa hơn)."""
     t0 = time.time()
@@ -671,6 +726,8 @@ def choose_drop(balls, held, W, H, sp, ep, think_s=2.5, n_x=25, next_levels=(1, 
             if b[0] == lv_ and lv_ < NLV:
                 for dx in (0.0, -(b[3] + r_) * 0.97, (b[3] + r_) * 0.97):
                     xs.append(min(max(b[1] + dx, r_), W - r_))
+        if valleys and balls:
+            xs.extend(min(max(vx, r_), W - r_) for vx in _valley_xs(balls, W, H))
         out = []
         for x in sorted(xs):
             if not out or abs(x - out[-1]) > 0.006 * W:
@@ -684,10 +741,23 @@ def choose_drop(balls, held, W, H, sp, ep, think_s=2.5, n_x=25, next_levels=(1, 
         if time.time() - t0 > think_s * 0.5 and len(res1) >= 8:
             break
     res1.sort(key=lambda t: -t[0])
+    if refine and len(res1) >= 3 and time.time() - t0 < think_s * 0.5:
+        # tinh chỉnh vị trí: thử thêm 2 điểm sát hai bên mỗi nước trong top 3 (lưới thô cách nhau ~(W-2r)/n_x px, heo nhỏ chui khe cần chính xác hơn)
+        step_x = max(4.0, 0.3 * (W - 2 * r) / max(1, n_x))
+        have = [t_[1] for t_ in res1]
+        for s_, x_, _nb, _g in list(res1[:3]):
+            for dx_ in (-step_x, step_x):
+                xn = min(max(x_ + dx_, lo), hi)
+                if any(abs(xn - h_) < 0.5 * step_x for h_ in have):
+                    continue
+                nb_, g_ = simulate(balls, W, H, (lv, xn, r, y0_for(r)), sp)
+                res1.append((evaluate(nb_, g_, W, H, ep), xn, nb_, g_))
+                have.append(xn)
+        res1.sort(key=lambda t: -t[0])
     best = res1[0]
     final = []
     for s1, x, nb, g in res1[:topk]:
-        tot, cnt = 0.0, 0
+        tot, cnt = 0.0, 0.0
         for nl in next_levels:
             r2 = r_for(nl, W)
             bests = None
@@ -696,11 +766,12 @@ def choose_drop(balls, held, W, H, sp, ep, think_s=2.5, n_x=25, next_levels=(1, 
                 e2 = evaluate(nb2, g2, W, H, ep)
                 if bests is None or e2 > bests:
                     bests = e2
-            tot += bests
-            cnt += 1
+            wgt = LEVEL_PROB.get(nl, 0.25) if ep.next_weighted else 1.0
+            tot += wgt * bests
+            cnt += wgt
             if time.time() - t0 > think_s:
                 break
-        base = 0.4 * s1 + 0.6 * (tot / max(1, cnt)) if cnt else s1
+        base = 0.4 * s1 + 0.6 * (tot / cnt) if cnt else s1
         # (a) thả THẲNG vào tâm heo cùng cấp (chắc chắn chạm) được thưởng nhẹ so với thả lệch sang cạnh
         if g > 0 and ep.w_direct > 0:
             _fb, _fdx, _ = first_contact(balls, x, r)
@@ -1238,7 +1309,9 @@ def run_auto_pig_step(adb, step: dict, should_stop=None, log=None) -> bool:
       assume_held (true) / held_default (1) - không đọc được con cầm 3 lần liền thì đoán cấp held_default (tối đa 3 lần, sau 6 lần dừng)
       reset_params (false)   - true: xoá debug_dir/pig_params.json (tham số vật lý đã hiệu chỉnh) và dùng mặc định
       gravity / damping / friction / elasticity / rad_scale / merge_eps - tham số mô phỏng
-      w_*                    - trọng số hàm đánh giá (xem EvalParams)
+      w_*                    - trọng số hàm đánh giá (xem EvalParams); mới 2026-10-09: w_lose (phạt THUA cứng, 1e6), w_count (60: mỗi con heo còn trên bàn),
+                               w_skyline (3000: chiều cao trung bình mặt đống), w_small_cnt / w_tower (mặc định 0 = tắt); lose_margin (0.02), next_weighted (true), small_max (3)
+      valleys (true) / refine (true) - thêm vị trí thả ở chỗ trũng mặt đống / tinh chỉnh vị trí quanh 3 nước tốt nhất
       save_shots (true) / debug_dir ('debug_pig') / shots_keep (40) - ảnh kiểm tra mỗi lượt + nhật ký pig_log.jsonl
     """
     should_stop = should_stop or (lambda: False)
@@ -1267,7 +1340,9 @@ def run_auto_pig_step(adb, step: dict, should_stop=None, log=None) -> bool:
     sp = _load_params(step, log)
     radius_fix = bool(step.get("radius_fix", True))      # đồng nhất bán kính từng cấp (heo bàn + con cầm); false = như cũ
     rbook = RadiusBook()
-    ep = EvalParams(**{k: v for k, v in step.items() if k.startswith("w_") or k == "danger_line"})
+    ep = EvalParams(**{k: v for k, v in step.items() if k.startswith("w_") or k in ("danger_line", "lose_margin", "next_weighted", "small_max")})
+    use_valleys = bool(step.get("valleys", True))        # thêm vị trí thả ứng viên ở chỗ trũng mặt đống
+    use_refine = bool(step.get("refine", True))          # tinh chỉnh vị trí thả quanh 3 nước tốt nhất
     if save_shots or test:
         os.makedirs(debug_dir, exist_ok=True)
     t_start = time.time()
@@ -1382,7 +1457,8 @@ def run_auto_pig_step(adb, step: dict, should_stop=None, log=None) -> bool:
         else:
             think_s = max(float(step.get("think_min", 1.2)), held_wait - (time.time() - t_ready) - 0.1)
         y0_fix = tap_y * H if spawn_y == "click" else None
-        x_drop, info = choose_drop(balls, (held[0], held[3]), W, H, sp, ep, think_s=think_s, n_x=n_x, log=log, held_top=held_top, y0_fixed=y0_fix)
+        x_drop, info = choose_drop(balls, (held[0], held[3]), W, H, sp, ep, think_s=think_s, n_x=n_x, log=log, held_top=held_top, y0_fixed=y0_fix,
+                                   valleys=use_valleys, refine=use_refine)
         y0_held = y0_fix if y0_fix is not None else held[2]
         pred, _ = simulate(balls, W, H, (held[0], x_drop, held[3], y0_held), sp)
         turn += 1
