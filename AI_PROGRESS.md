@@ -1,5 +1,19 @@
 # AI Progress
 
+## Đợt mới (2026-10-10, auto_pig) - Phối heo: phân tích log THẬT (pig_log.jsonl 3444 dòng + pig_params.json), tắt tự hiệu chỉnh vật lý, thử các đề xuất cấu hình (patch `pig_calib_off.patch`, ÁP SAU `pig_cover_count.patch`; sửa `pig_bot.py`)
+
+Người chơi gửi log thật + pig_params.json kèm 1 bộ đề xuất cấu hình (bật dồn góc `w_corner` 25/`w_inv` 15/`w_buried` 10, tăng `w_bigpair` 20/`w_blocker` 15/`bigpair_min` 4, GIẢM `w_count` 60 và TĂNG `w_cover` 300, `cand_x` bước 2 từ 9 lên 15, `think_s` 2.5-3s).
+Phân tích log (file chứa nhiều ván ghi XEN KẼ - chạy nhiều giả lập cùng ghi 1 file; tách bằng cách nối lượt k với k+1 theo `pred_err` đã ghi: 38 chuỗi >= 15 lượt):
+- Log do bản code CŨ tạo ra (chạy lại 30 lượt bằng code hiện tại chỉ trùng nước 8/30; mục `top` ghi -33k = phạt cũ, chưa có phạt thua cứng) -> các bản vá 2026-10-09 CHƯA được kiểm trên máy thật.
+- Ván thật ~140 lượt còn 11-26 con (TB ~16, giả lập cùng lượt ~12), luôn có nhiều cặp cùng cấp rời nhau (vd 2xL8, 3xL6, 2xL5).
+- 16% lượt là "GỘP ẢO": mô phỏng dự đoán gộp mà ảnh thật KHÔNG gộp (462/2916 lượt có khối lượng khớp); 5.6% thật gộp mà mô phỏng không thấy. Khe hở thật giữa 2 con cùng cấp sau gộp ảo: p10 0.28 bán kính, median 2.4 -> phần lớn do con thả lăn/nảy khác dự đoán, một phần là chạm sát chưa tới. Đây là lý do bot xây cặp rời nhau: 1/6 kế hoạch gộp không xảy ra.
+- `pig_params.json` của người chơi: gravity 0.8 = CHẠM ĐÁY `CAL_RANGE` (0.8-9), friction 1.185 gần trần 1.3. Trên 2305 cặp lượt liên tiếp (cùng số con): sai số dự đoán tham số mặc định 0.0185 (mẫu 160) so với 0.024 của tham số đã hiệu chỉnh; trên tập kiểm 300 mẫu (hàm mục tiêu = sai số vị trí + 0.1 x lệch số con): mặc định 0.0610, đã hiệu chỉnh 0.0700 -> TỰ HIỆU CHỈNH ĐANG LÀM TỆ. Tìm lại ngẫu nhiên rộng hơn (gravity 0.3-3, friction 0.1-2, merge_eps +-): 2 lần tìm cho kết quả khác nhau (0.0556 và 0.0704 trên tập kiểm), chênh <= 9% -> mặt phẳng phẳng/nhiễu, không có bộ tham số "đúng" rõ; KHÔNG đổi tham số mặc định.
+- Sửa: `auto_calib` mặc định true -> FALSE và `_load_params` KHÔNG nạp `debug_dir/pig_params.json` trừ khi `auto_calib: true` hoặc `use_saved_params: true` (cấu hình bước; `gravity/damping/...` ghi đè trong bước vẫn dùng như cũ). Người chơi không cần xoá file cũ.
+- `choose_drop` thêm tham số `n_x2` (mặc định 9, đúng như cũ) để chỉnh số vị trí thử cho con kế.
+Thử các đề xuất bằng giả lập (chỉ số "con thừa" giữa ván, 8 ván x 170 lượt, seed 41-48, thấp = gọn; bản hiện tại w_count 250 + w_cover 150 = 6.41, SE 0.50): áp TRỌN bộ đề xuất 8.52 (SE 0.85, tệ hơn); chỉ dồn góc/bậc thang/buried 7.71 (tệ hơn); chỉ `w_bigpair` 20/`w_blocker` 15/`bigpair_min` 4: 6.69 (SE 0.55, ngang, không hơn); chỉ `n_x2` 15: 7.48 (SE 0.42, không hơn). => KHÔNG áp các đề xuất này; giữ mặc định hiện tại. Riêng việc giảm `w_count` về 60 là đi ngược kết quả đo (60 -> 250 giảm con thừa 9.73 -> 6.41).
+- Nghĩ lâu hơn (`think_s` 2.5-3s) chưa đo được lợi ích riêng (giả lập dùng 0.3s/lượt cho nhanh); lần thử sớm cho thấy ~+11% sống ở 1.2s so với 0.3s nhưng mẫu nhỏ. Có thể đặt `think_s: 2.5` trong bước nếu máy đủ tải.
+- Việc nên làm tiếp: chạy bản mới trên máy thật vài chục lượt rồi gửi lại `pig_log.jsonl` (mới, xoá file cũ trước, hoặc chạy 1 giả lập/lần để khỏi ghi xen kẽ) để đo lại tỉ lệ gộp ảo và số con giữa ván.
+
 ## Đợt mới (2026-10-09, auto_pig, lần 2) - Phối heo: phạt ĐÈ con to lên con nhỏ + phạt số con mạnh hơn (patch `pig_cover_count.patch`, ÁP SAU `pig_tidy_small.patch`; sửa `pig_bot.py`)
 
 Báo lỗi (2 ảnh: người chơi tự chơi bước 189 chỉ còn ~6 con L10/L7/L5/L4/L2/L1 rất gọn; bot chơi bước 235 có 27-31 con lộn xộn, kẹt): bot không tính cần bao nhiêu con để gộp lên cấp cao mà đè bừa; chỗ có L1/L2 lại thả L3 lên trên -> kẹt.

@@ -749,7 +749,7 @@ def _block_wedge_penalty(balls, W, ep):
 
 
 def choose_drop(balls, held, W, H, sp, ep, think_s=2.5, n_x=25, next_levels=(1, 2, 3, 4), topk=6, log=None, held_top=None, y0_fixed=None,
-                valleys=True, refine=True):
+                valleys=True, refine=True, n_x2=9):
     """Trả (x_trong_khung, thông tin). held=(lv,r). held_top: mép trên con cầm cách mép trên khung (x W) -> heo rơi từ ĐÚNG độ cao
     thật (mặc định HELD_TOP) thay vì ngay sát mép khung (rơi từ cao hơn thì chạm sàn/heo mạnh hơn, lăn xa hơn)."""
     t0 = time.time()
@@ -801,7 +801,7 @@ def choose_drop(balls, held, W, H, sp, ep, think_s=2.5, n_x=25, next_levels=(1, 
         for nl in next_levels:
             r2 = r_for(nl, W)
             bests = None
-            for x2 in cand_x(nl, r2, 9):
+            for x2 in cand_x(nl, r2, n_x2):
                 nb2, g2 = simulate(nb, W, H, (nl, x2, r2, y0_for(r2)), sp)
                 e2 = evaluate(nb2, g2, W, H, ep)
                 if bests is None or e2 > bests:
@@ -1018,7 +1018,13 @@ def _load_params(step, log):
             log("info", "🐷 reset_params: bỏ tham số vật lý đã lưu, dùng mặc định")
         except Exception:
             pass
+    if not (step.get("auto_calib", False) or step.get("use_saved_params", False)):
+        d = None        # 2026-10-10: log thật cho thấy tham số tự hiệu chỉnh dự đoán TỆ hơn mặc định -> mặc định không nạp file đã lưu
+    else:
+        d = True
     try:
+        if d is None:
+            raise FileNotFoundError("bỏ qua pig_params.json (auto_calib/use_saved_params tắt)")
         with open(_params_path(step), encoding="utf-8") as f:
             d = json.load(f)
         for k in CAL_RANGE:
@@ -1339,7 +1345,8 @@ def run_auto_pig_step(adb, step: dict, should_stop=None, log=None) -> bool:
       tap_y (0.08)           - độ cao điểm bấm trong khung (0 = mép trên, 1 = đáy) khi drop_mode='tap'
       think_s (tự động)      - thời gian suy nghĩ tối đa mỗi lượt; mặc định tính sao cho xong trong lúc đợi held_wait
       held_wait (2.0)        - chỉ bấm thả sau khi con kế hiện đủ ngần này giây (phòng lag); lúc đó bot đã chụp + tính xong
-      auto_calib (true) / calib_every (6) / calib_s (2.0) - tự hiệu chỉnh gravity/damping/friction/elasticity/rad_scale từ ảnh thật, lưu debug_dir/pig_params.json
+      use_saved_params (false) - true: nạp debug_dir/pig_params.json đã lưu dù auto_calib tắt
+      auto_calib (false; trước 2026-10-10 là true) / calib_every (6) / calib_s (2.0) - tự hiệu chỉnh gravity/damping/friction/elasticity/rad_scale từ ảnh thật, lưu debug_dir/pig_params.json
       n_x (25)               - số vị trí thả thử
       Chờ heo lăn yên: game chỉ hiện con kế tiếp khi heo đã lăn xong -> chờ con cũ biến mất (gone_max=2.5s) -> chờ con kế hiện (ready_max=25s)
                              -> chờ thêm held_wait (2.0s) rồi mới chụp để tính lượt tiếp; settle_min (0.25s) = nghỉ ngay sau khi bấm
@@ -1370,7 +1377,7 @@ def run_auto_pig_step(adb, step: dict, should_stop=None, log=None) -> bool:
     think_cfg = step.get("think_s")             # None = tự tính để xong trong lúc đợi held_wait
     held_wait = float(step.get("held_wait", 2.0))
     held_top = float(step.get("held_top", HELD_TOP))
-    auto_calib = bool(step.get("auto_calib", True))
+    auto_calib = bool(step.get("auto_calib", False))     # 2026-10-10: mặc định TẮT (3246 cặp lượt thật: tham số tự học sai số 0.024 > mặc định 0.0185)
     calib_every = int(step.get("calib_every", 6))
     calib_s = float(step.get("calib_s", 2.0))
     n_x = int(step.get("n_x", 25))
