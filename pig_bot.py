@@ -405,7 +405,7 @@ class EvalParams:
         self.safe_line = 0.25
         self.w_flat = 800.0       # phạt bề mặt đống heo gồ ghề (cột cao hẹp sát tường): x độ lệch chuẩn chiều cao các cột / H
         self.w_l10 = 3000.0       # thưởng mỗi con cấp cao nhất (L10) đang nằm trên bàn
-        self.w_count = 60.0       # phạt MỖI con heo còn trên bàn: mỗi lần gộp (kể cả L1+L1) bớt 1 con = +60 điểm -> gộp heo nhỏ thay vì để rải rác ; 0 = tắt
+        self.w_count = 250.0      # phạt MỖI con heo còn trên bàn: mỗi lần gộp (kể cả L1+L1) bớt 1 con = +250 điểm -> gộp heo nhỏ thay vì để rải rác (60 -> 250 ngày 2026-10-09) ; 0 = tắt
         self.w_corner = 0.0      # thưởng con TO NHẤT nằm sát góc (khe giữa nó và tường góc càng nhỏ càng tốt)
         self.w_inv = 0.0          # phạt "đảo thứ tự": con to hơn nằm XA góc hơn con nhỏ hơn (muốn dốc giảm dần từ góc ra), x chênh cấp
         self.w_buried = 0.0       # phạt heo nhỏ (cấp<=3) bị heo khác đè lên phía trên (thả từ trên xuống không còn tới được), x 2^cấp
@@ -420,8 +420,46 @@ class EvalParams:
         self.small_max = 3
         self.w_tower = 0.0        # phạt cột heo CAO vọt so với mặt đống (trung vị các cột) - tránh dựng tháp sát tường ; 0 = tắt
         self.w_skyline = 3000.0   # phạt CHIỀU CAO TRUNG BÌNH của mặt đống (x tỉ lệ H): heo nhỏ chui vào chỗ trũng thay vì chất lên đỉnh -> bàn gọn, ít khe rỗng ; 0 = tắt
+        # --- đợt 2026-10-09 (2): sửa kiểu chơi "đè bừa", cặp cùng cấp nằm rời nhau ---
+        self.w_cover = 150.0      # phạt heo nhỏ bị heo TO HƠN (khác cấp) đè lên trên (thả L3 lên chỗ có L1/L2): x (1 + cấp) ; 0 = tắt
+        self.w_far = 0.0          # phạt cặp CÙNG cấp nằm xa nhau (không chạm được): x 2^cấp x min(1, khe/(2r)) ; chỉ tính cặp gần nhau nhất của mỗi cấp ; 0 = tắt
         for k, v in kw.items():
             setattr(self, k, v)
+
+
+def _cover_far_penalty(balls, W, ep):
+    """(1) w_cover: heo nhỏ có heo TO HƠN nằm ngay trên và chạm -> bị chôn, muốn gộp phải đợi con to đi mất (hầu như không bao giờ).
+    (2) w_far: mỗi cấp có >= 2 con thì cặp gần nhất mà còn hở càng xa càng bị phạt (theo khối lượng 2^cấp): ép dồn cặp về nhau/gộp ngay."""
+    pen = 0.0
+    n = len(balls)
+    if ep.w_cover > 0:
+        for i in range(n):
+            li, xi, yi, ri = balls[i]
+            if li >= NLV:
+                continue
+            for j in range(n):
+                if i == j:
+                    continue
+                lj, xj, yj, rj = balls[j]
+                if lj > li and yj < yi and abs(xj - xi) < 0.75 * (ri + rj) and math.hypot(xi - xj, yi - yj) - ri - rj < 0.12 * ri:
+                    pen += ep.w_cover * (1 + li)
+                    break
+    if ep.w_far > 0:
+        by = {}
+        for b in balls:
+            if b[0] < NLV:
+                by.setdefault(b[0], []).append(b)
+        for lv_, lst in by.items():
+            if len(lst) < 2:
+                continue
+            best = 1e9
+            for a in range(len(lst)):
+                for c in range(a + 1, len(lst)):
+                    d = math.hypot(lst[a][1] - lst[c][1], lst[a][2] - lst[c][2]) - lst[a][3] - lst[c][3]
+                    best = min(best, d)
+            r_ = lst[0][3]
+            pen += ep.w_far * (2 ** lv_) * min(1.0, max(0.0, best) / (2.0 * r_))
+    return pen
 
 
 def _bigpair_score(balls, W, ep):
@@ -557,6 +595,8 @@ def evaluate(balls, gain, W, H, ep):
         sc -= ep.w_small_cnt * sum(1 for b in balls if b[0] <= ep.small_max)
     if ep.w_tower > 0:
         sc -= _tower_penalty(balls, W, H, ep)
+    if ep.w_cover > 0 or ep.w_far > 0:
+        sc -= _cover_far_penalty(balls, W, ep)
     if ep.w_skyline > 0:
         hs24 = _col_tops(balls, W, H, 24)
         sc -= ep.w_skyline * sum(H - h for h in hs24) / (24.0 * H)
