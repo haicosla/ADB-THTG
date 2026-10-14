@@ -65,8 +65,8 @@ Bot auto "Điện Thoại PHS Mạnh" (game gộp điện thoại/phụ kiện, 
 ======================================================================================================
 - `apply_tap()`: +1 cấp -> gộp nhóm (ưu tiên nhóm chứa ô vừa ấn) -> rơi theo cột -> lặp tới ổn định; trả (bàn mới, doanh thu).
 - `apply_remove()`: kéo ô vào Mở tiệm -> ô biến mất, +V(cấp) -> rơi theo cột -> gộp dây chuyền. Hành động trong kế hoạch: ấn = (hàng, cột), KÉO = (hàng, cột, "x")
-  (`gen_actions`, `apply_action`). Bot kéo bằng `adb.swipe_px` từ tâm ô tới ĐIỂM THẢ ở quầy điện thoại (`drag_ms`). Toạ độ điểm thả CHƯA đo: thử lần lượt
-  `SHOP_DROP_CANDIDATES` (toạ độ ảnh 720x1280), lần kéo nào làm bàn đổi thì nhớ dùng điểm đó (`_drop_ok`); thử hết các điểm mà không lần nào đổi thì TẮT kéo
+  (`gen_actions`, `apply_action`). Bot kéo bằng `adb.swipe_hold_px` (nhấn -> di chuyển `drag_ms` -> GIỮ YÊN `drag_hold_ms` ở quầy -> nhả; vuốt thường nhả tay khi món chưa tới nơi nên thả hụt) từ tâm ô tới ĐIỂM THẢ ở quầy điện thoại. Điểm thả = KHAY ĐIỆN THOẠI ở quầy (đã đo trên ảnh người dùng khoanh đỏ, nhưng CHƯA thử trên LDPlayer thật): thử lần lượt
+  `SHOP_DROP_CANDIDATES` (toạ độ ảnh 720x1280; điểm đầu = tâm khay điện thoại người dùng khoanh đỏ), lần kéo nào làm bàn đổi thì nhớ điểm đó (`_drop_ok`); thử hết các điểm mà không lần nào đổi thì TẮT kéo
   (log cảnh báo). Sau khi điểm thả đã đúng, kéo 1 ô mà bàn + số bước không đổi: thử lại 1 lần, 2 lần liền thì không kéo ô đó nữa; 3 ô thất bại thì TẮT kéo.
   Chốt điểm thả bằng field `drop_xy`; ảnh debug (chế độ TEST) có chữ thập xanh "tha" đánh dấu điểm thả để kiểm tra bằng mắt.
 - `beam_search()`: thử chuỗi ấn dài tới `min(số_bước_còn, depth)` giữ `beam` bàn tốt nhất mỗi tầng; điểm = doanh thu đã gộp (nhân `discount`^số nước
@@ -101,7 +101,8 @@ Bot auto "Điện Thoại PHS Mạnh" (game gộp điện thoại/phụ kiện, 
   allow_remove (true) - cho phép KÉO ô tới quầy điện thoại để bán (false = chỉ ấn như bản cũ); remove_locked (true) - cho kéo cả ô khoá
   remove_top (1)      - chỉ kéo ô thuộc ngần này mức cấp CAO NHẤT đang có trên bàn (0 = kéo bất kỳ ô nào; 2 = thêm mức nhì, điểm nhỉnh hơn chút)
   remove_min_level (3) - không kéo món cấp thấp hơn mức này;  remove_only_stuck (false) - true = chỉ kéo khi hết nước ăn
-  drag_ms (450)       - thời gian vuốt khi kéo ô; drop_xy ([x, y], toạ độ ảnh 720x1280) - điểm thả cố định (không đặt = tự thử SHOP_DROP_CANDIDATES)
+  drag_ms (700)       - thời gian di chuyển khi kéo ô; drag_hold_ms (500) - giữ yên tại điểm thả trước khi nhả (0 = nhả ngay); drag_steps (12) - số điểm trung gian
+                        (mỗi điểm 1 lệnh adb: nhiều = mượt nhưng chậm hơn); drop_xy ([x, y], toạ độ ảnh 720x1280) - điểm thả cố định (không đặt = tự thử SHOP_DROP_CANDIDATES)
   debug (false)       - lưu ảnh debug_phs/ mỗi nước (test luôn lưu)
   lost_limit (4)      - số lần liên tiếp không thấy bàn thì kết thúc bước
 
@@ -131,9 +132,10 @@ BOARD_X0, BOARD_X1 = 34.0, 688.0
 BOARD_Y0, BOARD_Y1 = 499.0, 1154.0
 PITCH = (BOARD_X1 - BOARD_X0) / N              # ~130.8
 SHOP_BTN = (640.0, 435.0)
-# Điểm THẢ khi kéo ô để bán: khu "quầy điện thoại" ngay PHÍA TRÊN nút Mở tiệm (người dùng nói 14/10), KHÔNG phải chính nút (nút chỉ sáng khi hết bước).
-# Toạ độ chính xác CHƯA đo -> thử lần lượt các điểm này, điểm nào làm bàn đổi thì nhớ dùng tiếp; đặt field `drop_xy` [x, y] (toạ độ ảnh 720x1280) để chốt 1 điểm.
-SHOP_DROP_CANDIDATES = [(640.0, 350.0), (640.0, 300.0), (640.0, 250.0), (600.0, 300.0)]
+# Điểm THẢ khi kéo ô để bán: KHAY ĐIỆN THOẠI ở quầy (vòng đỏ người dùng khoanh trên ảnh 720x1280 ngày 14/10: x ~335..650, y ~245..408, tâm ~(490, 328)),
+# KHÔNG phải nút Mở tiệm (nút chỉ sáng khi hết bước). Điểm đầu = tâm khay; các điểm sau là dự phòng cũng nằm trong khay, dùng khi kéo vào điểm đầu mà bàn
+# không đổi (bot thử lần lượt, điểm nào làm bàn đổi thì nhớ dùng tiếp). Đặt field `drop_xy` [x, y] (toạ độ ảnh 720x1280) để chốt 1 điểm.
+SHOP_DROP_CANDIDATES = [(490.0, 330.0), (430.0, 340.0), (560.0, 320.0), (480.0, 285.0)]
 SHOP_BTN_BOX = (610, 405, 675, 465)
 STEPS_BOX = (503, 398, 572, 472)
 ENERGY_BOX = (25, 436, 160, 468)
@@ -671,7 +673,7 @@ class PhsBot:
     def __init__(self, adb, log=None, should_stop=None, test=False, max_seconds=0, depth=6, beam=120, steps_default=6,
                  tap_wait=0.6, debug=False, lost_limit=4, shop_level=0, rules: Optional[Rules] = None,
                  min_level=0, max_level=0, sleep=time.sleep, now=time.time,
-                 settle_max=6.0, settle_reads=4, settle_gap=0.25, pix_thr=2.0, settle_hard=60.0, drag_ms=450, drop_xy=None):
+                 settle_max=6.0, settle_reads=4, settle_gap=0.25, pix_thr=2.0, settle_hard=60.0, drag_ms=700, drop_xy=None, drag_hold_ms=500, drag_steps=12):
         self.adb = adb
         self.log = log or (lambda level, msg: print(f"[{level}] {msg}"))
         self.should_stop = should_stop or (lambda: False)
@@ -686,7 +688,9 @@ class PhsBot:
         self.rules = rules or Rules()
         self.sleep, self.now = sleep, now
         self.settle_max = float(settle_max)            # chờ bàn đứng yên tối đa bao nhiêu giây KỂ TỪ LẦN BÀN ĐỔI GẦN NHẤT
-        self.drag_ms = int(drag_ms)                    # thời gian vuốt khi kéo ô tới quầy điện thoại (ms)
+        self.drag_ms = int(drag_ms)                    # thời gian di chuyển từ ô tới quầy điện thoại (ms)
+        self.drag_hold_ms = int(drag_hold_ms)          # GIỮ YÊN tại điểm thả bấy nhiêu ms rồi mới nhả tay (0 = nhả ngay như vuốt thường)
+        self.drag_steps = max(1, int(drag_steps))      # số điểm trung gian khi di chuyển (nhiều = mượt, nhưng mỗi điểm là 1 lệnh adb)
         try:
             self._drops = [(float(drop_xy[0]), float(drop_xy[1]))] if drop_xy else list(SHOP_DROP_CANDIDATES)
         except Exception:
@@ -809,7 +813,14 @@ class PhsBot:
     def _drag_to_shop(self, geo: Geo, r, c):
         """Kéo (vuốt) từ tâm ô (r, c) tới điểm thả ở quầy điện thoại (phía trên nút Mở tiệm)."""
         sx, sy = geo.ref_xy(*self._drop_point())
-        self.adb.swipe_px(geo.cx(c), geo.cy(r), sx, sy, self.drag_ms)
+        x1, y1 = geo.cx(c), geo.cy(r)
+        hold = getattr(self.adb, "swipe_hold_px", None)
+        if hold is not None and self.drag_hold_ms > 0:
+            # Nhấn -> di chuyển từng đoạn -> GIỮ YÊN ở quầy -> nhả: món đồ đang kéo chạy theo tay chậm hơn tay, vuốt thường (swipe_px) nhả tay khi nó
+            # chưa tới nơi nên bị thả hụt (người dùng báo 14/10). Giữ yên cho nó tới nơi rồi mới nhả.
+            hold(x1, y1, sx, sy, move_duration_ms=self.drag_ms, hold_ms=self.drag_hold_ms, steps=self.drag_steps)
+        else:
+            self.adb.swipe_px(x1, y1, sx, sy, self.drag_ms)
 
     def run(self) -> bool:
         lost = 0
@@ -869,7 +880,7 @@ class PhsBot:
                         if self._drop_tries >= max(2, len(self._drops)):
                             self.rules.allow_remove = False
                             self.log("warn", f"PHS: đã thử {self._drop_tries} lần kéo (điểm thả {self._drops}) mà không lần nào làm bàn đổi - TẮT hành động kéo "
-                                             "(chỉ ấn). Đặt field drop_xy [x, y] (toạ độ ảnh 720x1280, khu quầy điện thoại phía trên nút Mở tiệm) hoặc allow_remove=false")
+                                             "(chỉ ấn). Thử tăng drag_hold_ms (thả quá sớm cũng làm kéo hụt), đặt field drop_xy [x, y] (toạ độ ảnh 720x1280, tâm khay điện thoại ở quầy) hoặc allow_remove=false")
                         else:
                             self._drop_idx = (self._drop_idx + 1) % len(self._drops)
                             self.log("warn", f"PHS: kéo ô {cell} không làm bàn đổi - thử điểm thả khác {self._drop_point()}")
@@ -941,8 +952,8 @@ def run_auto_phs_step(adb, step: dict, should_stop=None, log=None) -> bool:
         tap_wait=step.get("tap_wait", 0.6), debug=step.get("debug", False), lost_limit=step.get("lost_limit", 4),
         shop_level=step.get("shop_level", 0), min_level=step.get("min_level", 0), max_level=step.get("max_level", 0), rules=rules,
         settle_max=step.get("settle_max", 6.0), settle_reads=step.get("settle_reads", 4), settle_gap=step.get("settle_gap", 0.25),
-        pix_thr=step.get("pix_thr", 2.0), settle_hard=step.get("settle_hard", 60.0), drag_ms=step.get("drag_ms", 450),
-        drop_xy=step.get("drop_xy"),
+        pix_thr=step.get("pix_thr", 2.0), settle_hard=step.get("settle_hard", 60.0), drag_ms=step.get("drag_ms", 700),
+        drop_xy=step.get("drop_xy"), drag_hold_ms=step.get("drag_hold_ms", 500), drag_steps=step.get("drag_steps", 12),
     )
     return bot.run()
 

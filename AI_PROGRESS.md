@@ -1,5 +1,22 @@
 # AI Progress
 
+## Đợt mới (2026-10-14, PHS kéo giữ) - `auto_phs`: kéo bán dùng "Kéo & Giữ" (giữ yên ở quầy rồi mới nhả) + điểm thả = tâm khay điện thoại người dùng khoanh đỏ (patch `phs_hold.patch`, ÁP SAU `phs_top.patch` (đã commit 33626c8); sửa `phs_bot.py`, `PROJECT_CONTEXT.md`, `AI_PROGRESS.md`)
+
+Người dùng gửi ảnh màn chơi (720x1280, vòng đỏ quanh KHAY ĐIỆN THOẠI ở quầy, x ~335..650, y ~245..408) và báo: bot kéo thả hơi nhanh, chưa tới vị trí đã thả.
+- Điểm thả: `SHOP_DROP_CANDIDATES` = [(490,330) tâm khay, (430,340), (560,320), (480,285)] - cả 4 điểm nằm trong vòng đỏ (điểm đầu + các dự phòng); bot vẫn thử lần lượt và nhớ điểm kéo được, `drop_xy` chốt 1 điểm. (Thay đổi hằng số này có trong cây làm việc trước khi sửa tiếp; đã giữ nguyên.)
+- Thả quá sớm: trước dùng `adb.swipe_px` (vuốt rồi nhả tay ngay khi tới đích) trong khi món đang kéo chạy theo tay chậm hơn -> nhả khi chưa tới nơi. Nay `_drag_to_shop` dùng `adb.swipe_hold_px` (có sẵn trong `adb_helper.py`, giống bước "Kéo & Giữ" của `logic_engine.py`): nhấn -> di chuyển `drag_ms` (700) qua `drag_steps` (12) điểm -> GIỮ YÊN `drag_hold_ms` (500) ở quầy -> nhả. `drag_hold_ms: 0` hoặc adb không có `swipe_hold_px` thì quay về `swipe_px`. Mỗi lần kéo tốn ~2-3s thật (mỗi điểm trung gian là 1 lệnh adb). Field mới `drag_hold_ms`, `drag_steps` (tuỳ chọn); `drag_ms` mặc định 450 -> 700; `PhsBot.__init__` thêm tham số ở CUỐI.
+- Cảnh báo "TẮT kéo" (thử hết điểm thả mà bàn không đổi) nay gợi ý thêm: tăng `drag_hold_ms` (thả sớm cũng làm kéo hụt) hoặc đặt `drop_xy`.
+- Test (game giả có ADB giả: chỉ nhận thả nếu tay giữ yên ở quầy >= 300ms): mặc định mới kéo thành công 12/12, toạ độ kéo từ tâm ô tới (490, 330) giữ 500ms; kiểu cũ (nhả ngay) và giữ 100ms đều thất bại 0 lần thành công (bot xoay điểm thả rồi tắt kéo, vẫn ấn bình thường). CHƯA chạy LDPlayer thật - cần xem thực tế đã thả trúng quầy chưa (nếu chưa: tăng `drag_hold_ms` 800-1000 hoặc `drag_ms` 900).
+- Ghi chú từ ảnh: ô khoá cấp 8 (điện thoại xanh lá, hàng 4 cột 2) hiện "?" vì CHƯA có mẫu `templates/phs_lv8.png` -> bot coi là ô lạ (không ấn, không kéo được). Thêm mẫu bằng ảnh GỐC (không phải ảnh debug có chữ hồng): `python phs_bot.py anh.png --add-level 8 4 2`. Ảnh gửi có "Số bước 0" + nút Mở tiệm sáng: đúng trạng thái bot dừng (không kéo được).
+
+## Đợt mới (2026-10-14, PHS kéo cấp cao) - `auto_phs`: chỉ kéo bán ô CẤP CAO NHẤT (không kéo tùm lum ô thấp) + tuỳ chọn chỉ kéo khi hết nước ăn (patch `phs_top.patch`, ÁP SAU `phs_drop.patch` (đã commit f8f0a05); sửa `phs_bot.py`, `PROJECT_CONTEXT.md`, `AI_PROGRESS.md`)
+
+Người dùng báo bot kéo tùm lum; muốn kéo ô cấp cao (lợi hơn) hoặc chỉ kéo khi không còn nước đi.
+- Nguyên nhân: sau patch kéo, `gen_removes` cho kéo MỌI ô nên cuối vòng/lúc không có nước ăn tốt, bot kéo cả ô cấp 1-4 chỉ để lấy 10-177 điểm (log game giả: 10/41 lần kéo là ô cấp 1-4).
+- `Rules.remove_top` (1): chỉ kéo ô thuộc N mức cấp cao nhất đang có trên bàn (tính lại theo từng bàn trong beam search nên kéo xong ô cao nhất thì mức kế tiếp mới được kéo); `Rules.remove_min_level` (3): không kéo món thấp hơn; `Rules.remove_only_stuck` (false): `PhsBot._plan` thử CHỈ ấn trước, có nước ăn (doanh thu > 0) thì dùng, chưa có mới tính cả kéo. Field bước `auto_phs` cùng tên (đều tuỳ chọn). `remove_top=0, remove_min_level=1` = hành vi cũ.
+- Mô phỏng 16 ván x 8 vòng (bàn giữ nguyên giữa các vòng, pot 0.2): chỉ ấn 62.9k; kéo mọi ô 91.3k (14% lần kéo là ô cấp <= 2, cấp TB 6.0); KÉO Ô CAO NHẤT cấp >= 3 (mặc định mới) 84.2k (0% ô cấp <= 2, cấp TB 7.2); 2 mức cao nhất 85.8k; chỉ kéo khi hết nước ăn 62.6k (bàn hầu như luôn còn nước ăn nên gần như không kéo: 0.2 lần/ván). Mặc định chọn "cao nhất" theo ý người dùng, đánh đổi ~8% điểm so với kéo mọi ô; muốn điểm cao hơn đặt `remove_top` = 2 hoặc 0.
+- Game giả có hoạt ảnh (3 ván x 4 vòng): mặc định mới chỉ kéo ô cấp 5-8, không cú nào bị bỏ qua lúc hoạt ảnh; chế độ cũ kéo cả cấp 1-4; `remove_only_stuck` kéo 0.7 lần/ván (đúng ô cấp 8); `allow_remove=false` không kéo. CHƯA chạy LDPlayer thật.
+
 ## Đợt mới (2026-10-14, PHS điểm thả) - `auto_phs`: kéo bán thả ở QUẦY ĐIỆN THOẠI (phía trên nút Mở tiệm) + ô khoá kéo được (patch `phs_drop.patch`, ÁP SAU `phs_remove.patch` (đã commit ddf8b34); sửa `phs_bot.py`, `PROJECT_CONTEXT.md`, `AI_PROGRESS.md`)
 
 Người dùng xác nhận: (1) kéo tốn 1 bước, ưu tiên kéo món cấp cao hoặc kéo để tạo nhiều nước ăn; (2) ô khoá cũng kéo được; (3) thả vào khu quầy điện thoại PHÍA TRÊN nút Mở tiệm (không phải chính nút), kéo lúc nào cũng được khi còn bước, hết bước (tiệm sáng) thì không kéo được.
