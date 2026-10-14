@@ -1,5 +1,14 @@
 # AI Progress
 
+## Đợt mới (2026-10-14, PHS kéo nhiều cách) - `auto_phs`: kéo thử NHIỀU CÁCH (nhấn giữ nhấc món -> vuốt chậm -> `input draganddrop`) + ảnh chẩn đoán + sửa OCR số bước + thưởng ô trống (patch `phs_drag2.patch`, ÁP SAU `phs_hold.patch` (đã commit d84d4bf); sửa `phs_bot.py`, `PROJECT_CONTEXT.md`, `AI_PROGRESS.md`)
+
+Người dùng báo "không thấy nó kéo được" (log: 4 điểm thả thử mà bàn không đổi) và thuật toán hay ấn tăng cấp, chưa tính gộp để làm trống bàn cho điện thoại mới rơi vào.
+- Kéo: không biết LDPlayer nhận cách nào nên `PhsBot._gesture` có 3 cách, field `drag_methods` (mặc định ["hold","swipe","dnd"]): "hold" = `input touchscreen motionevent` DOWN -> GIỮ YÊN `drag_pick_ms` (350, để game nhận là nhấc món) -> MOVE `drag_ms` qua `drag_steps` -> giữ yên `drag_hold_ms` -> UP; "swipe" = `adb.swipe_px` chậm `drag_slow_ms` (1500); "dnd" = `input draganddrop`. Kéo hụt (bàn không đổi, chưa lần nào thành công) thì ĐỔI CÁCH, hết vòng cách thì đổi điểm thả; thành công thì nhớ cách + điểm. Tối đa `drag_tries` (6) lần hụt rồi TẮT kéo (vẫn ấn bình thường). `PhsBot.__init__` thêm tham số cuối `drag_methods, drag_pick_ms, drag_slow_ms, drag_tries`.
+- Chẩn đoán: 3 lần kéo đầu chụp 1 ảnh GIỮA lúc giữ tay ở quầy (`debug_phs/drag_mid_*.png`) và mỗi lần hụt chụp ảnh `drag_fail_<cách>_*.png` (tối đa 8 ảnh/lần chạy). Nếu vẫn không kéo được: gửi các ảnh này.
+- OCR số bước: đọc số bước LỚN HƠN số trước đó (log: còn 2 -> đọc 7, chắc là chữ 1) thì coi là trước - 1 (`_fix_steps`, log cảnh báo); dùng cho cả kế hoạch lẫn điều kiện dừng khi tiệm sáng.
+- Thuật toán: `Rules.hole_weight` (field `hole_weight`, mặc định bước = 0.3) x V(`refill_level`, 0 = min_level+1) cho mỗi ô TRỐNG sau gộp/kéo (sẽ có món mới rơi vào, miễn phí) -> ưu tiên nước làm trống bàn. Mô phỏng 3 ván x 4 vòng (min 3/max 10, 7 bước): hole 0 = 162.6k, 0.3 = 168.2k, 0.6 = 155.7k, 1.0 = 141.8k (nhiễu lớn, chỉ +3.5%; >0.6 hại vì kéo/gộp ô thấp quá nhiều).
+- Test (game giả chỉ nhận 1 cách): đủ cách -> kéo ngay bằng hold; chỉ swipe -> xoay 1 lần rồi dùng swipe; chỉ dnd -> xoay 2 lần; không cách nào -> tắt kéo sau 6 lần hụt. CHƯA chạy LDPlayer thật.
+
 ## Đợt mới (2026-10-14, PHS kéo giữ) - `auto_phs`: kéo bán dùng "Kéo & Giữ" (giữ yên ở quầy rồi mới nhả) + điểm thả = tâm khay điện thoại người dùng khoanh đỏ (patch `phs_hold.patch`, ÁP SAU `phs_top.patch` (đã commit 33626c8); sửa `phs_bot.py`, `PROJECT_CONTEXT.md`, `AI_PROGRESS.md`)
 
 Người dùng gửi ảnh màn chơi (720x1280, vòng đỏ quanh KHAY ĐIỆN THOẠI ở quầy, x ~335..650, y ~245..408) và báo: bot kéo thả hơi nhanh, chưa tới vị trí đã thả.

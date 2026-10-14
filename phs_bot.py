@@ -415,6 +415,8 @@ class Rules:
     remove_top: int = 1                        # chỉ kéo ô thuộc `remove_top` mức cấp CAO NHẤT đang có trên bàn (0 = không giới hạn) - người dùng: "kéo cái cao lợi hơn"
     remove_min_level: int = 3                  # không kéo món thấp hơn cấp này (kéo cấp 1, 2 chỉ được 10-31 điểm mà tốn 1 bước)
     remove_only_stuck: bool = False            # true = CHỈ kéo khi không còn nước ăn được trong số bước còn lại (xem PhsBot.run)
+    hole_weight: float = 0.0                   # mỗi ô TRỐNG sau khi gộp/kéo sẽ có điện thoại MỚI rơi vào (miễn phí) -> thưởng hole_weight x V(refill_level) mỗi ô trống
+    refill_level: int = 0                      # cấp ước lượng của món mới rơi vào (0 = min_level + 1)
 
     def V(self, k):
         """Điểm khi gộp 3 món ra món cấp k (cũng là điểm khi kéo 1 món cấp k vào nút Mở tiệm)."""
@@ -578,6 +580,10 @@ def evaluate(b: Board, rules: Rules):
                         lo_rc = (r, c) if L < M else (ny, nx)
                         if not b.locked[lo_rc[0]][lo_rc[1]] and low < rules.max_level:
                             tot += rules.near_bonus * rules.pot(low + 1)
+    if rules.hole_weight > 0:
+        holes = sum(1 for row in b.lv for v in row if v == 0)
+        if holes:
+            tot += rules.hole_weight * rules.V(rules.refill_level or max(1, rules.min_level + 1)) * holes
     return tot
 
 
@@ -673,7 +679,8 @@ class PhsBot:
     def __init__(self, adb, log=None, should_stop=None, test=False, max_seconds=0, depth=6, beam=120, steps_default=6,
                  tap_wait=0.6, debug=False, lost_limit=4, shop_level=0, rules: Optional[Rules] = None,
                  min_level=0, max_level=0, sleep=time.sleep, now=time.time,
-                 settle_max=6.0, settle_reads=4, settle_gap=0.25, pix_thr=2.0, settle_hard=60.0, drag_ms=700, drop_xy=None, drag_hold_ms=500, drag_steps=12):
+                 settle_max=6.0, settle_reads=4, settle_gap=0.25, pix_thr=2.0, settle_hard=60.0, drag_ms=700, drop_xy=None, drag_hold_ms=500, drag_steps=12,
+                 drag_methods=None, drag_pick_ms=350, drag_slow_ms=1500, drag_tries=6):
         self.adb = adb
         self.log = log or (lambda level, msg: print(f"[{level}] {msg}"))
         self.should_stop = should_stop or (lambda: False)
@@ -695,6 +702,14 @@ class PhsBot:
             self._drops = [(float(drop_xy[0]), float(drop_xy[1]))] if drop_xy else list(SHOP_DROP_CANDIDATES)
         except Exception:
             self._drops = list(SHOP_DROP_CANDIDATES)
+        if isinstance(drag_methods, str):
+            drag_methods = [m.strip() for m in drag_methods.split(",")]
+        self._methods = [m for m in (drag_methods or ["hold", "swipe", "dnd"]) if m in ("hold", "swipe", "dnd")] or ["hold"]
+        self.drag_pick_ms = int(drag_pick_ms)          # cách "hold": nhấn giữ yên tại ô bấy nhiêu ms để game nhận là NHẤC món lên, rồi mới kéo
+        self.drag_slow_ms = int(drag_slow_ms)          # cách "swipe": vuốt liền 1 lệnh adb, chậm để món kịp chạy theo tay
+        self.drag_tries = max(1, int(drag_tries))      # số lần kéo thử (đổi cách/điểm thả) mà bàn không đổi thì TẮT kéo
+        self._method_idx = 0                           # cách kéo đang dùng (chỉ số trong _methods)
+        self._drag_shots = 0                           # số ảnh chẩn đoán kéo đã lưu
         self._drop_idx = 0                             # điểm thả đang dùng (chỉ số trong _drops)
         self._drop_ok = False                          # True khi đã có 1 lần kéo làm bàn đổi -> điểm thả đúng
         self._drop_tries = 0                           # số điểm thả đã thử mà không có tác dụng (khi chưa xác nhận)
@@ -807,20 +822,76 @@ class PhsBot:
                 return plan, rev
         return beam_search(pb, depth, self.beam, self.rules, nr)
 
+    def _fix_steps(self, steps, pending):
+        """Số bước vừa đọc mà LỚN HƠN số bước trước lúc ấn/kéo thì chắc chắn OCR nhầm (vd chữ 1 đọc thành 7: log 14/10 đọc 2 -> 7): coi là trước - 1.
+        Trả số bước đã sửa, hoặc None nếu đọc hợp lý."""
+        if pending is None or steps is None or pending[2] is None or steps <= pending[2]:
+            return None
+        fixed = max(0, pending[2] - 1)
+        self.log("warn", f"PHS: đọc số bước {steps} nhưng trước đó còn {pending[2]} và vừa ấn/kéo 1 lần -> OCR nhầm, coi là còn {fixed}")
+        return fixed
+
     def _drop_point(self):
         return self._drops[self._drop_idx % len(self._drops)]
 
     def _drag_to_shop(self, geo: Geo, r, c):
         """Kéo (vuốt) từ tâm ô (r, c) tới điểm thả ở quầy điện thoại (phía trên nút Mở tiệm)."""
         sx, sy = geo.ref_xy(*self._drop_point())
-        x1, y1 = geo.cx(c), geo.cy(r)
-        hold = getattr(self.adb, "swipe_hold_px", None)
-        if hold is not None and self.drag_hold_ms > 0:
-            # Nhấn -> di chuyển từng đoạn -> GIỮ YÊN ở quầy -> nhả: món đồ đang kéo chạy theo tay chậm hơn tay, vuốt thường (swipe_px) nhả tay khi nó
-            # chưa tới nơi nên bị thả hụt (người dùng báo 14/10). Giữ yên cho nó tới nơi rồi mới nhả.
-            hold(x1, y1, sx, sy, move_duration_ms=self.drag_ms, hold_ms=self.drag_hold_ms, steps=self.drag_steps)
+        self._gesture(self._methods[self._method_idx % len(self._methods)], geo.cx(c), geo.cy(r), sx, sy)
+
+    def _method(self):
+        return self._methods[self._method_idx % len(self._methods)]
+
+    def _save_shot(self, frame, name):
+        """Lưu 1 ảnh chẩn đoán kéo vào debug_phs/ (tối đa 8 ảnh/lần chạy)."""
+        if self._drag_shots >= 8 or frame is None:
+            return None
+        self._drag_shots += 1
+        try:
+            os.makedirs(DEBUG_DIR, exist_ok=True)
+            path = os.path.join(DEBUG_DIR, f"{name}_{time.strftime('%H%M%S')}.png")
+            cv2.imencode(".png", frame)[1].tofile(path)
+            return path
+        except Exception:
+            return None
+
+    def _gesture(self, method, x1, y1, x2, y2):
+        """Thực hiện 1 cú kéo từ (x1,y1) tới (x2,y2) bằng 1 trong các cách (không chắc cách nào game nhận -> `_methods` thử lần lượt):
+        - "hold": nhấn giữ yên `drag_pick_ms` (để game nhận là nhấc món lên) -> di chuyển `drag_ms` qua `drag_steps` điểm -> GIỮ YÊN `drag_hold_ms` ở quầy
+          (món chạy theo tay chậm hơn tay, nhả ngay thì thả hụt) -> nhả. Dùng lệnh `input touchscreen motionevent` như `adb.swipe_hold_px`.
+          Giữa lúc giữ yên chụp 1 ảnh chẩn đoán (3 lần đầu) để xem món có chạy theo tay không.
+        - "swipe": `adb.swipe_px` liền 1 lệnh, chậm `drag_slow_ms`.
+        - "dnd": lệnh Android `input draganddrop` (kéo-thả chuẩn, có nhấn giữ lúc đầu)."""
+        a = self.adb
+        ix1, iy1, ix2, iy2 = (int(round(v)) for v in (x1, y1, x2, y2))
+        if method == "swipe":
+            a.swipe_px(x1, y1, x2, y2, self.drag_slow_ms)
+            return
+        if method == "dnd":
+            a.run_cmd(["shell", "input", "draganddrop", str(ix1), str(iy1), str(ix2), str(iy2), str(self.drag_slow_ms)],
+                      timeout=15 + self.drag_slow_ms / 1000.0)
+            return
+        ev = lambda kind, x, y: a.run_cmd(["shell", "input", "touchscreen", "motionevent", kind, str(x), str(y)])
+        ev("DOWN", ix1, iy1)
+        self.sleep(max(0, self.drag_pick_ms) / 1000.0)
+        n = max(1, self.drag_steps)
+        gap = max(0.001, (self.drag_ms / 1000.0) / n)
+        for k in range(1, n + 1):
+            self.sleep(gap)
+            ev("MOVE", int(ix1 + (ix2 - ix1) * k / n), int(iy1 + (iy2 - iy1) * k / n))
+        hold = max(0, self.drag_hold_ms) / 1000.0
+        if self._drag_shots < 3 and hold > 0:
+            self.sleep(hold / 2)
+            try:
+                p = self._save_shot(a.screencap_fast(), "drag_mid")
+                if p:
+                    self.log("info", f"PHS: ảnh chụp GIỮA lúc kéo (đang giữ tay ở quầy): {p}")
+            except Exception:
+                pass
+            self.sleep(hold / 2)
         else:
-            self.adb.swipe_px(x1, y1, sx, sy, self.drag_ms)
+            self.sleep(hold)
+        ev("UP", ix2, iy2)
 
     def run(self) -> bool:
         lost = 0
@@ -848,7 +919,8 @@ class PhsBot:
                                      "thêm mẫu bằng: python phs_bot.py anh.png --add-level N hàng cột")
                 steps = read_steps(fr, geo)
                 ready = shop_ready(fr, geo)
-                if steps == 0 or (steps is None and ready):
+                steps_fix = self._fix_steps(steps, pending)
+                if steps == 0 or (steps is None and ready) or (steps_fix == 0 and ready):
                     self.log("info", f"PHS: hết bước ({self.taps} lần ấn) - dừng, bạn tự Mở tiệm")
                     if self.test:
                         save_debug(fr, geo, board)
@@ -863,7 +935,8 @@ class PhsBot:
                         fr, geo, board = self._wait_stable(1.0)
                         steps = read_steps(fr, geo)
                         ready = shop_ready(fr, geo)
-                        if steps == 0 or (steps is None and ready):
+                        steps_fix = self._fix_steps(steps, (cell, key0, steps0, was_rm))
+                        if steps == 0 or (steps is None and ready) or (steps_fix == 0 and ready):
                             self.log("info", f"PHS: hết bước ({self.taps} lần ấn) - dừng, bạn tự Mở tiệm")
                             return True
                         if not board_ok(board):
@@ -873,17 +946,22 @@ class PhsBot:
                         self._noeff.clear()
                         if was_rm and not self._drop_ok:
                             self._drop_ok = True
-                            self.log("info", f"PHS: điểm thả {self._drop_point()} (toạ độ ảnh 720x1280) kéo được - dùng tiếp điểm này")
+                            self.log("info", f"PHS: kéo được bằng cách '{self._method()}' tại điểm thả {self._drop_point()} (toạ độ ảnh 720x1280) - dùng tiếp cách này")
                     elif was_rm and not self._drop_ok:
-                        # chưa có lần kéo nào thành công: nghi SAI ĐIỂM THẢ -> thử điểm khác (chưa tính lỗi của ô)
+                        # chưa có lần kéo nào thành công: nghi SAI CÁCH KÉO hoặc SAI ĐIỂM THẢ -> đổi cách (hold -> swipe -> dnd), hết vòng thì đổi điểm thả
                         self._drop_tries += 1
-                        if self._drop_tries >= max(2, len(self._drops)):
+                        p = self._save_shot(fr, f"drag_fail_{self._method()}")
+                        if self._drop_tries >= self.drag_tries:
                             self.rules.allow_remove = False
-                            self.log("warn", f"PHS: đã thử {self._drop_tries} lần kéo (điểm thả {self._drops}) mà không lần nào làm bàn đổi - TẮT hành động kéo "
-                                             "(chỉ ấn). Thử tăng drag_hold_ms (thả quá sớm cũng làm kéo hụt), đặt field drop_xy [x, y] (toạ độ ảnh 720x1280, tâm khay điện thoại ở quầy) hoặc allow_remove=false")
+                            self.log("warn", f"PHS: đã thử {self._drop_tries} lần kéo (các cách {self._methods}, điểm thả {self._drops}) mà không lần nào làm bàn đổi - TẮT hành động kéo "
+                                             "(chỉ ấn). Gửi các ảnh drag_*.png trong " + DEBUG_DIR + "/ để chẩn đoán; thử tăng drag_hold_ms/drag_pick_ms, đặt drop_xy [x, y], "
+                                             "đổi drag_methods hoặc allow_remove=false" + (f" (ảnh sau lần kéo hụt: {p})" if p else ""))
                         else:
-                            self._drop_idx = (self._drop_idx + 1) % len(self._drops)
-                            self.log("warn", f"PHS: kéo ô {cell} không làm bàn đổi - thử điểm thả khác {self._drop_point()}")
+                            self._method_idx += 1
+                            if self._method_idx % len(self._methods) == 0:
+                                self._drop_idx = (self._drop_idx + 1) % len(self._drops)
+                            self.log("warn", f"PHS: kéo ô {cell} không làm bàn đổi - thử cách '{self._method()}' tại điểm thả {self._drop_point()}"
+                                             + (f" (ảnh sau lần kéo hụt: {p})" if p else ""))
                     else:
                         nk = (cell[0], cell[1], "x") if was_rm else cell
                         n = self._noeff.get(nk, 0) + 1
@@ -900,7 +978,8 @@ class PhsBot:
                             self.log("warn", f"PHS: ấn ô {cell} {n} lần mà bàn + số bước không đổi - coi là ô không ấn được, bỏ qua ô này")
                         else:
                             self.log("warn", f"PHS: {what} {cell} không có tác dụng (bàn + số bước không đổi), thử lại 1 lần")
-                left = steps if steps is not None else self.steps_default
+                steps_cur = steps_fix if steps_fix is not None else steps
+                left = steps_cur if steps_cur is not None else self.steps_default
                 plan, rev = self._plan(board, left)
                 if not plan:
                     self.log("info", "PHS: không còn ô nào ấn được - dừng, bạn tự Mở tiệm\n" + board_text(board))
@@ -919,7 +998,7 @@ class PhsBot:
                         self.log("info", f"PHS TEST - bước còn: {steps}, nút Mở tiệm sáng: {ready}\n"
                                          + board_text(board) + (f"\nẢnh debug: {p}" if p else ""))
                         return True
-                pending = ((r, c), board.key(), steps, is_rm)
+                pending = ((r, c), board.key(), steps_cur, is_rm)
                 if is_rm:
                     self._drag_to_shop(geo, r, c)
                 else:
@@ -945,6 +1024,7 @@ def run_auto_phs_step(adb, step: dict, should_stop=None, log=None) -> bool:
         allow_remove=allow_remove, remove_locked=bool(step.get("remove_locked", True)),
         remove_top=int(step.get("remove_top", 1)), remove_min_level=int(step.get("remove_min_level", 3)),
         remove_only_stuck=bool(step.get("remove_only_stuck", False)),
+        hole_weight=float(step.get("hole_weight", 0.3)), refill_level=int(step.get("refill_level", 0)),
     )
     bot = PhsBot(
         adb, log=log, should_stop=should_stop, test=step.get("test", False), max_seconds=step.get("max_seconds", 0),
@@ -954,6 +1034,8 @@ def run_auto_phs_step(adb, step: dict, should_stop=None, log=None) -> bool:
         settle_max=step.get("settle_max", 6.0), settle_reads=step.get("settle_reads", 4), settle_gap=step.get("settle_gap", 0.25),
         pix_thr=step.get("pix_thr", 2.0), settle_hard=step.get("settle_hard", 60.0), drag_ms=step.get("drag_ms", 700),
         drop_xy=step.get("drop_xy"), drag_hold_ms=step.get("drag_hold_ms", 500), drag_steps=step.get("drag_steps", 12),
+        drag_methods=step.get("drag_methods"), drag_pick_ms=step.get("drag_pick_ms", 350), drag_slow_ms=step.get("drag_slow_ms", 1500),
+        drag_tries=step.get("drag_tries", 6),
     )
     return bot.run()
 
