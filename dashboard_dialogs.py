@@ -87,7 +87,7 @@ class DialogsMixin:
 
     def _open_multi_select_dialog(self, parent, title, items, selected_ids, on_save, group_of=None,
                                    allow_duplicates=False, system_actions=None, extra_labels=None,
-                                   button_mode=False):
+                                   button_mode=False, extra_groups=None):
         """Popup chọn nhiều mục bằng checkbox, CÓ SẮP XẾP ĐƯỢC THỨ TỰ CHẠY
         (dùng chung cho chọn Hoạt Động / chọn Tài Khoản khi soạn 1 lịch hẹn
         giờ hoặc xoay vòng tài khoản). `items`: list (id, nhãn).
@@ -261,8 +261,13 @@ class DialogsMixin:
                 if g not in groups_seen:
                     groups_seen.append(g)
         show_groups = group_of and (len(groups_seen) > 1 or (groups_seen and groups_seen[0] != "Chưa phân nhóm"))
+        # `extra_groups` (tuỳ chọn): list [(tên, [id,...])] - "Danh Sách Tuỳ Chỉnh" mà 1 mục nằm được
+        # trong NHIỀU danh sách; chỉ thêm nút "chọn nhanh", không đổi cách xếp checklist theo `group_of`.
+        _item_ids = {i for i, _l in items}
+        extra_groups = [(n, [i for i in ids if i in _item_ids]) for n, ids in (extra_groups or [])]
+        extra_groups = [(n, ids) for n, ids in extra_groups if ids]
 
-        if show_groups:
+        if show_groups or extra_groups:
             tk.Label(win, text="Chọn nhanh theo nhóm:", bg=COL_PANEL, fg=COL_TEXT_MUTED,
                      font=("Segoe UI", 8)).pack(anchor="w", padx=14, pady=(0, 2))
             group_bar = FlowBar(win, bg=COL_PANEL)
@@ -540,6 +545,20 @@ class DialogsMixin:
             canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
         canvas.bind("<MouseWheel>", _on_mousewheel)
         inner.bind("<MouseWheel>", _on_mousewheel)
+
+        if extra_groups:
+            def _select_ids(ids):
+                for iid in ids:
+                    if iid in vars_by_id:
+                        vars_by_id[iid].set(True)
+                        _add_to_order(iid)
+                _update_count()
+                _refresh_order_panel()
+
+            for _n, _ids in extra_groups:
+                group_bar.add(RoundedButton(group_bar, f"☑ 📋 {_n}", command=lambda ids=_ids: _select_ids(ids),
+                                             bg=COL_GRAY_BTN, container_bg=COL_PANEL, font=("Segoe UI", 8, "bold"),
+                                             padx=8, pady=3))
 
         if show_groups:
             def _select_group(g):

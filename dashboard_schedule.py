@@ -1129,7 +1129,8 @@ class ScheduleMixin:
                         applied_var.set(True)
                 self._open_multi_select_dialog(
                     win, f"Chọn Tài Khoản xoay vòng trên {label}",
-                    account_items, list(row_state[idx]["accounts"]), _on_save, group_of=account_group_of)
+                    account_items, list(row_state[idx]["accounts"]), _on_save, group_of=account_group_of,
+                    extra_groups=account_manager.account_lists_for_entries(self.accounts))
             btn.command = _pick
 
             row_state[idx] = {"applied_var": applied_var, "accounts": chosen_accounts, "btn": btn}

@@ -499,9 +499,20 @@ class AccountsMixin:
             ra ngoài (không còn nằm trong _rebuild_filter_buttons) để
             _move_row() cũng gọi lại được sau khi đổi chỗ 1 dòng."""
             current_filter["group"] = g
+            # g = None (Tất cả) | tên Nhóm (str) | ("list", tên) = Danh Sách Tuỳ Chỉnh
+            # (1 tài khoản nằm được nhiều danh sách; chỉ hiện dòng, ẩn tiêu đề Nhóm).
+            list_ids = None
+            if isinstance(g, tuple) and len(g) == 2 and g[0] == "list":
+                list_ids = set(account_manager.load_account_lists().get(g[1], []))
             for kind, w, _gname in layout_order:
                 w.pack_forget()
             for kind, w, gname in layout_order:
+                if list_ids is not None:
+                    if kind == "row":
+                        rw = next((r for r in row_widgets if r["row"] is w), None)
+                        if rw is not None and rw["id"] in list_ids:
+                            w.pack(fill="x", pady=2)
+                    continue
                 # Dùng nhom_var HIỆN TẠI của từng dòng (không phải
                 # "group" lúc tạo dòng) để lọc đúng ngay cả khi người
                 # dùng vừa gõ đổi Nhóm trong ô combobox trước khi lọc.
@@ -659,6 +670,12 @@ class AccountsMixin:
                 filter_btns_frame.add(RoundedButton(filter_btns_frame, g, command=lambda g=g: _apply_filter(g),
                                                      bg=COL_GRAY_BTN, container_bg=COL_PANEL, font=("Segoe UI", 8, "bold"),
                                                      padx=8, pady=3))
+            # Danh Sách Tuỳ Chỉnh (1 tài khoản ở nhiều danh sách) - nút màu tím, có tiền tố 📋
+            for ln in account_manager.load_account_lists().keys():
+                filter_btns_frame.add(RoundedButton(filter_btns_frame, f"📋 {ln}",
+                                                     command=lambda ln=ln: _apply_filter(("list", ln)),
+                                                     bg=COL_PURPLE, container_bg=COL_PANEL,
+                                                     font=("Segoe UI", 8, "bold"), padx=8, pady=3))
 
         _rebuild_filter_buttons()
 
@@ -681,6 +698,25 @@ class AccountsMixin:
         btn_bar.add(RoundedButton(btn_bar, "➕ Thêm Tài Khoản", command=lambda: _add_row({}),
                                    bg=COL_BLUE, container_bg=COL_PANEL, font=("Segoe UI", 9, "bold")))
 
+        def _open_lists():
+            def _accounts_now():
+                return [(rw["id"], (rw["ten_var"].get().strip() or rw["user_var"].get().strip() or rw["id"]))
+                        for rw in row_widgets]
+
+            def _on_lists_changed():
+                _rebuild_filter_buttons()
+                # đang lọc theo 1 danh sách vừa bị xoá/đổi tên -> quay về Tất cả
+                cf = current_filter["group"]
+                if isinstance(cf, tuple) and cf[1] not in account_manager.load_account_lists():
+                    _apply_filter(None)
+                elif isinstance(cf, tuple):
+                    _apply_filter(cf)
+
+            self._open_account_lists_dialog(win, _accounts_now, _on_lists_changed)
+
+        btn_bar.add(RoundedButton(btn_bar, "📋 Danh Sách Tuỳ Chỉnh", command=_open_lists,
+                                   bg=COL_PURPLE, container_bg=COL_PANEL, font=("Segoe UI", 9, "bold")))
+
         def _save_all():
             new_entries = []
             for rw in row_widgets:
@@ -702,6 +738,148 @@ class AccountsMixin:
 
         btn_bar.add(RoundedButton(btn_bar, "💾 Lưu Tất Cả", command=_save_all,
                                    bg=COL_GREEN, container_bg=COL_PANEL, font=("Segoe UI", 9, "bold")))
+
+    # ================= 📋 DANH SÁCH TUỲ CHỈNH (1 tài khoản ở NHIỀU danh sách) =================
+    def _open_account_lists_dialog(self, parent, get_accounts, on_change=None):
+        """Cửa sổ tạo/đổi tên/xoá 'Danh Sách Tuỳ Chỉnh' và tick tài khoản vào từng danh sách. Khác 'Nhóm'
+        (mỗi tài khoản 1 nhóm), 1 tài khoản tick được vào NHIỀU danh sách. Lưu vào data/account_lists.json
+        (account_manager.load/save_account_lists), TỰ LƯU mỗi lần tick/đổi - không cần bấm Lưu.
+        `get_accounts()` -> [(id, nhãn)]; `on_change()` gọi sau mỗi thay đổi để cửa sổ cha vẽ lại nút lọc."""
+        from tkinter import simpledialog
+        lists = account_manager.load_account_lists()
+        win = ThemedToplevel(parent)
+        win.title("Danh Sách Tuỳ Chỉnh (1 tài khoản ở nhiều danh sách)")
+        win.configure(bg=COL_PANEL)
+        wg.restore_geometry(win, "account_lists_dialog", default="720x520")
+        win.minsize(560, 360)
+        _bind_esc_close(win)
+        wg.autosave(win, "account_lists_dialog")
+
+        tk.Label(win, text="📋 Chọn 1 danh sách bên trái, rồi tick các tài khoản thuộc danh sách đó ở bên phải. "
+                           "Mỗi tài khoản có thể nằm trong NHIỀU danh sách. Tự lưu ngay khi tick.",
+                 bg=COL_PANEL, fg=COL_TEXT_MUTED, font=("Segoe UI", 8), wraplength=680,
+                 justify="left").pack(anchor="w", padx=14, pady=(12, 6))
+
+        body = tk.Frame(win, bg=COL_PANEL)
+        body.pack(fill="both", expand=True, padx=14, pady=(0, 10))
+        left = tk.Frame(body, bg=COL_PANEL)
+        left.pack(side="left", fill="y")
+        right = tk.Frame(body, bg=COL_PANEL)
+        right.pack(side="left", fill="both", expand=True, padx=(12, 0))
+
+        listbox = tk.Listbox(left, width=24, height=14, exportselection=False, bg=COL_PANEL_ALT, fg=COL_TEXT,
+                             selectbackground=COL_BLUE, relief="flat", highlightthickness=0)
+        listbox.pack(fill="both", expand=True)
+        btns = FlowBar(left, bg=COL_PANEL)
+        btns.pack(fill="x", pady=(6, 0))
+
+        canvas = tk.Canvas(right, bg=COL_PANEL, highlightthickness=0)
+        vbar = ttk.Scrollbar(right, orient="vertical", command=canvas.yview)
+        inner = tk.Frame(canvas, bg=COL_PANEL)
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.configure(yscrollcommand=vbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        vbar.pack(side="right", fill="y")
+
+        state = {"name": None}
+
+        def _persist():
+            account_manager.save_account_lists(lists)
+            if on_change:
+                on_change()
+
+        def _refresh_names(select=None):
+            listbox.delete(0, "end")
+            for n in lists:
+                listbox.insert("end", f"{n}  ({len(lists[n])})")
+            names = list(lists)
+            if select in names:
+                listbox.selection_set(names.index(select))
+            state["name"] = select if select in names else None
+            _draw_accounts()
+
+        def _on_select(_e=None):
+            sel = listbox.curselection()
+            names = list(lists)
+            state["name"] = names[sel[0]] if sel else None
+            _draw_accounts()
+
+        listbox.bind("<<ListboxSelect>>", _on_select)
+
+        def _toggle(aid, var):
+            n = state["name"]
+            if n is None:
+                return
+            ids = lists[n]
+            if var.get() and aid not in ids:
+                ids.append(aid)
+            elif not var.get() and aid in ids:
+                ids.remove(aid)
+            _persist()
+            names = list(lists)
+            listbox.delete(names.index(n))
+            listbox.insert(names.index(n), f"{n}  ({len(ids)})")
+            listbox.selection_set(names.index(n))
+
+        def _draw_accounts():
+            for w in inner.winfo_children():
+                w.destroy()
+            n = state["name"]
+            if n is None:
+                tk.Label(inner, text="(Chọn hoặc tạo 1 danh sách ở bên trái)", bg=COL_PANEL,
+                         fg=COL_TEXT_MUTED).pack(anchor="w", pady=10, padx=4)
+                return
+            for aid, label in get_accounts():
+                v = tk.BooleanVar(value=aid in lists[n])
+                DarkCheck(inner, label, v, command=lambda aid=aid, v=v: _toggle(aid, v),
+                          bg=COL_PANEL, wraplength=380).pack(anchor="w", pady=2, padx=4)
+
+        def _new():
+            name = (simpledialog.askstring("Tạo danh sách", "Tên danh sách mới:", parent=win) or "").strip()
+            if not name:
+                return
+            if name in lists:
+                messagebox.showinfo("Trùng tên", f"Đã có danh sách '{name}'.", parent=win)
+                return
+            lists[name] = []
+            _persist()
+            _refresh_names(select=name)
+
+        def _rename():
+            old = state["name"]
+            if old is None:
+                return
+            name = (simpledialog.askstring("Đổi tên", "Tên mới:", initialvalue=old, parent=win) or "").strip()
+            if not name or name == old:
+                return
+            if name in lists:
+                messagebox.showinfo("Trùng tên", f"Đã có danh sách '{name}'.", parent=win)
+                return
+            # giữ nguyên thứ tự các danh sách
+            items = [(name if k == old else k, v) for k, v in lists.items()]
+            lists.clear()
+            lists.update(items)
+            _persist()
+            _refresh_names(select=name)
+
+        def _delete():
+            n = state["name"]
+            if n is None:
+                return
+            if not messagebox.askyesno("Xoá danh sách", f"Xoá danh sách '{n}'? (tài khoản vẫn còn nguyên)",
+                                       parent=win):
+                return
+            lists.pop(n, None)
+            _persist()
+            _refresh_names()
+
+        for text, cmd, col in (("➕ Tạo", _new, COL_BLUE), ("✏️ Đổi tên", _rename, COL_GRAY_BTN),
+                               ("🗑 Xoá", _delete, COL_RED)):
+            btns.add(RoundedButton(btns, text, command=cmd, bg=col, container_bg=COL_PANEL,
+                                    font=("Segoe UI", 8, "bold"), padx=8, pady=3))
+
+        _refresh_names(select=next(iter(lists), None))
 
     # ================= ⚡ LOG NHANH (chọn NHIỀU giả lập, mỗi giả lập gán 1 tài khoản, đăng nhập đồng thời, lưu theo Nhóm) =================
     def _open_quick_login_dialog(self):
@@ -1032,6 +1210,7 @@ class AccountsMixin:
         acc_by_id = {a.get("id"): a for a in accounts}
         acc_buttons = {}  # id -> RoundedButton
         selected = {"id": None, "group": None}
+        custom_lists = account_manager.load_account_lists()  # Danh Sách Tuỳ Chỉnh {tên: [id,...]}
 
         def _account_label(a):
             return a.get("ten_hien_thi") or a.get("username") or a.get("id")
@@ -1065,7 +1244,10 @@ class AccountsMixin:
 
             filtered = []
             for a in accounts:
-                if group and (a.get("nhom") or "").strip() != group:
+                if isinstance(group, tuple):  # ("list", tên) = Danh Sách Tuỳ Chỉnh
+                    if a.get("id") not in custom_lists.get(group[1], []):
+                        continue
+                elif group and (a.get("nhom") or "").strip() != group:
                     continue
                 if needle:
                     haystack = " ".join([a.get("ten_hien_thi") or "", a.get("username") or "",
@@ -1115,6 +1297,12 @@ class AccountsMixin:
             group_filter_btns.add(RoundedButton(group_filter_btns, g, command=lambda g=g: _apply_group_filter(g),
                                                  bg=COL_GRAY_BTN, container_bg=COL_PANEL, font=("Segoe UI", 8, "bold"),
                                                  padx=8, pady=3))
+
+        for ln in custom_lists.keys():
+            group_filter_btns.add(RoundedButton(group_filter_btns, f"📋 {ln}",
+                                                 command=lambda ln=ln: _apply_group_filter(("list", ln)),
+                                                 bg=COL_PURPLE, container_bg=COL_PANEL,
+                                                 font=("Segoe UI", 8, "bold"), padx=8, pady=3))
 
         _populate()
         filter_var.trace_add("write", lambda *_a: _populate(group=selected["group"], text_filter=filter_var.get()))

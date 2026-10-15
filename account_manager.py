@@ -284,3 +284,67 @@ def delete_quick_login_group(name, path=QUICK_LOGIN_GROUPS_PATH):
     groups = load_quick_login_groups(path)
     groups.pop(str(name).strip(), None)
     return save_quick_login_groups(groups, path)
+
+
+# ======================= 📋 DANH SÁCH TUỲ CHỈNH (1 tài khoản ở NHIỀU danh sách) =======================
+ACCOUNT_LISTS_PATH = paths.resolve_data_path("account_lists.json")
+
+
+def load_account_lists(path=ACCOUNT_LISTS_PATH):
+    """Đọc các 'Danh Sách Tuỳ Chỉnh' - KHÁC field 'nhom' (mỗi tài khoản CHỈ 1
+    nhóm): ở đây 1 tài khoản nằm được trong NHIỀU danh sách cùng lúc. Trả về
+    dict {ten_danh_sach: [id_tai_khoan, ...]} giữ NGUYÊN thứ tự đã lưu; {} nếu
+    chưa có. Không đụng tới accounts.json / field 'nhom'."""
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    cleaned = {}
+    for name, ids in data.items():
+        name = str(name).strip()
+        if not name or not isinstance(ids, list):
+            continue
+        seen = []
+        for i in ids:
+            if i and i not in seen:
+                seen.append(i)
+        cleaned[name] = seen
+    return cleaned
+
+
+def save_account_lists(lists, path=ACCOUNT_LISTS_PATH):
+    """Lưu đè TOÀN BỘ danh sách tuỳ chỉnh (dict {ten: [id,...]}). Trả về dict đã
+    dọn dẹp (bỏ tên rỗng, id trùng)."""
+    cleaned = {}
+    for name, ids in lists.items():
+        name = str(name).strip()
+        if not name:
+            continue
+        seen = []
+        for i in ids or []:
+            if i and i not in seen:
+                seen.append(i)
+        cleaned[name] = seen
+    with _accounts_file_lock:
+        paths.save_json(path, cleaned)
+    return cleaned
+
+
+def account_lists_for_entries(entries, lists=None):
+    """Trả về list [(ten_danh_sach, [id,...])] CHỈ gồm id còn tồn tại trong
+    `entries` (tài khoản đã xoá thì tự bị bỏ), giữ thứ tự danh sách; bỏ qua
+    danh sách rỗng. Dùng cho các popup chọn tài khoản (nút chọn nhanh)."""
+    if lists is None:
+        lists = load_account_lists()
+    valid = {e.get("id") for e in entries}
+    out = []
+    for name, ids in lists.items():
+        alive = [i for i in ids if i in valid]
+        if alive:
+            out.append((name, alive))
+    return out

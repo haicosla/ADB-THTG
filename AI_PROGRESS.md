@@ -1,5 +1,13 @@
 # AI Progress
 
+## Đợt mới (2026-10-15, Danh Sách Tuỳ Chỉnh cho tài khoản) - 1 tài khoản nằm được trong NHIỀU danh sách (patch `account_lists.patch`, áp lên repo main (commit 2b7adb7); sửa `account_manager.py`, `dashboard_accounts.py`, `dashboard_dialogs.py`, `dashboard_schedule.py`, `PROJECT_CONTEXT.md`, `AI_PROGRESS.md`)
+
+Người dùng: field `nhom` chỉ cho mỗi tài khoản 1 nhóm, muốn thêm kiểu list tuỳ chỉnh mà 1 tài khoản ở nhiều list.
+- Giữ NGUYÊN `nhom` (không đổi accounts.json). Thêm file dữ liệu mới `data/account_lists.json` = {tên_danh_sách: [id_tài_khoản,...]}; `account_manager.py`: `load_account_lists`, `save_account_lists`, `account_lists_for_entries(entries)` (bỏ id tài khoản đã xoá, bỏ list rỗng).
+- `dashboard_accounts.py`: nút "📋 Danh Sách Tuỳ Chỉnh" ở Quản Lý Tài Khoản mở cửa sổ `_open_account_lists_dialog` (Tạo/Đổi tên/Xoá list, tick tài khoản, tự lưu); nút lọc tím "📋 tên" cạnh nút lọc Nhóm (`_apply_filter` nhận `("list", tên)`); "🔑 Đăng Nhập 1 Acc" cũng có nút lọc theo list.
+- `dashboard_dialogs.py::_open_multi_select_dialog` thêm tham số `extra_groups` (list [(tên, [id])]) -> nút "☑ 📋 tên" chọn nhanh cả list; `dashboard_schedule.py::_open_gan_may_tk_dialog` truyền vào khi chọn tài khoản xoay vòng (dùng cho cả Chạy Xoay Vòng lẫn Hẹn Giờ).
+- Test: phần dữ liệu đã chạy thử; GIAO DIỆN Tkinter CHƯA test (sandbox không có tkinter) - cần mở thử trên Windows.
+
 ## Đợt mới (2026-10-14, PHS kéo nhiều cách) - `auto_phs`: kéo thử NHIỀU CÁCH (nhấn giữ nhấc món -> vuốt chậm -> `input draganddrop`) + ảnh chẩn đoán + sửa OCR số bước + thưởng ô trống (patch `phs_drag2.patch`, ÁP SAU `phs_hold.patch` (đã commit d84d4bf); sửa `phs_bot.py`, `PROJECT_CONTEXT.md`, `AI_PROGRESS.md`)
 
 Người dùng báo "không thấy nó kéo được" (log: 4 điểm thả thử mà bàn không đổi) và thuật toán hay ấn tăng cấp, chưa tính gộp để làm trống bàn cho điện thoại mới rơi vào.

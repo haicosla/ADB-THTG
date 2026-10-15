@@ -68,7 +68,7 @@ Class `DashboardApp` = `UIBuildMixin, EmulatorMixin, TaskMixin, RunMixin, EventA
 - `session_journal.py` - Sổ tiến độ phiên đang chạy (data/session_journal.json): 1 bản ghi/giả lập (chạy tay, lịch Hẹn Giờ, 👥 Xoay Vòng, 📦 Nhóm) + khoá `__queue__` lưu HÀNG CHỜ job; bản ghi xoá khi phiên kết thúc bình thường. Không lưu mật khẩu (tài khoản theo id).
 - `dashboard_resume.py` - ResumeMixin: lúc mở app, còn phiên dở/hàng chờ -> hộp "Phiên chạy bị gián đoạn" tick mục nào CHẠY TIẾP/NẠP LẠI; có `_persist_queue` (gọi từ `_notify_queue_changed`), `_serialize_job`/`_restore_job`. Không phủ 🎁 Hành Động Sự Kiện.
 - `scheduler.py` - Dữ liệu + tính toán lịch chạy tự động (không lo phần thực thi); mặc định lưới giờ CỐ ĐỊNH, lịch bật `tinh_tu_luc_chay` thì mốc kế = lúc chạy thật (`lan_chay_that_luc`) + lặp lại (`_chain_due_time`).
-- `account_manager.py` - Quản lý danh sách tài khoản dùng cho Xoay Vòng Tài Khoản.
+- `account_manager.py` - Quản lý danh sách tài khoản dùng cho Xoay Vòng Tài Khoản. Có thêm 'Danh Sách Tuỳ Chỉnh' (`data/account_lists.json`, 1 tài khoản ở nhiều list - khác `nhom` chỉ 1 nhóm): `load/save_account_lists`, `account_lists_for_entries`; UI ở `dashboard_accounts.py::_open_account_lists_dialog`, nút chọn nhanh qua tham số `extra_groups` của `_open_multi_select_dialog`.
 - `activity_groups.py` - Dữ liệu "Nhóm Hành Động" (gói đặt tên gồm nhiều Hoạt Động/hành động hệ thống theo thứ tự, có thể lồng nhóm - chống lặp vòng); dùng bởi dashboard_groups.py, dashboard_schedule.py, dashboard_run.py.
 - `variables_registry.py` - "🧩 Quản Lý Biến": danh sách biến dùng CHUNG cho mọi kịch bản (`variables.json`), Dashboard áp thẳng giá trị `default` mỗi lần chạy (ưu tiên hơn bước `input_var` trong kịch bản).
 
