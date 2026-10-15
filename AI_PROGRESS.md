@@ -1,5 +1,11 @@
 # AI Progress
 
+## Đợt mới (2026-10-15, PHS nhả tay khi kéo) - `auto_phs`: LUÔN nhả tay sau cú kéo "hold" (patch `phs_release.patch`, áp lên repo main; sửa `phs_bot.py`, `AI_PROGRESS.md`)
+
+Người dùng gửi ảnh: món cấp 3 bị nhấc khỏi ô giữa bàn (còn lỗ trống ở ô (1,1)), treo lơ lửng giữa bàn, không tới quầy; Số bước còn 1.
+- Nguyên nhân khả dĩ: `PhsBot._gesture` cách "hold" gửi DOWN -> nhiều MOVE -> UP bằng các lệnh adb riêng; bấm Dừng/adb timeout/lỗi giữa chừng thì UP không bao giờ được gửi -> tay ảo còn giữ, món treo lơ lửng. Nay DOWN..UP bọc `try/finally`: UP luôn gửi (tại điểm tay đang đứng nếu bị ngắt).
+- CHƯA xác định được vì sao bot kéo món cấp 3: theo code mặc định (`remove_top` 1, `remove_min_level` 3, `remove_locked` true) chỉ kéo ô cấp cao nhất (ở ảnh là ô khoá cấp 7); kéo cấp 3 chỉ xảy ra nếu step đặt `remove_top` 0/lớn hoặc chạy bản cũ. Đã xin log dòng "PHS kéo #..." + ảnh `debug_phs/drag_*.png` + thông số step. CHƯA test LDPlayer thật.
+
 ## Đợt mới (2026-10-14, PHS kéo nhiều cách) - `auto_phs`: kéo thử NHIỀU CÁCH (nhấn giữ nhấc món -> vuốt chậm -> `input draganddrop`) + ảnh chẩn đoán + sửa OCR số bước + thưởng ô trống (patch `phs_drag2.patch`, ÁP SAU `phs_hold.patch` (đã commit d84d4bf); sửa `phs_bot.py`, `PROJECT_CONTEXT.md`, `AI_PROGRESS.md`)
 
 Người dùng báo "không thấy nó kéo được" (log: 4 điểm thả thử mà bàn không đổi) và thuật toán hay ấn tăng cấp, chưa tính gộp để làm trống bàn cho điện thoại mới rơi vào.

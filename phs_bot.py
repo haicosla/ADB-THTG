@@ -873,25 +873,34 @@ class PhsBot:
             return
         ev = lambda kind, x, y: a.run_cmd(["shell", "input", "touchscreen", "motionevent", kind, str(x), str(y)])
         ev("DOWN", ix1, iy1)
-        self.sleep(max(0, self.drag_pick_ms) / 1000.0)
-        n = max(1, self.drag_steps)
-        gap = max(0.001, (self.drag_ms / 1000.0) / n)
-        for k in range(1, n + 1):
-            self.sleep(gap)
-            ev("MOVE", int(ix1 + (ix2 - ix1) * k / n), int(iy1 + (iy2 - iy1) * k / n))
-        hold = max(0, self.drag_hold_ms) / 1000.0
-        if self._drag_shots < 3 and hold > 0:
-            self.sleep(hold / 2)
+        last = [ix1, iy1]
+        try:
+            self.sleep(max(0, self.drag_pick_ms) / 1000.0)
+            n = max(1, self.drag_steps)
+            gap = max(0.001, (self.drag_ms / 1000.0) / n)
+            for k in range(1, n + 1):
+                self.sleep(gap)
+                last = [int(ix1 + (ix2 - ix1) * k / n), int(iy1 + (iy2 - iy1) * k / n)]
+                ev("MOVE", last[0], last[1])
+            hold = max(0, self.drag_hold_ms) / 1000.0
+            if self._drag_shots < 3 and hold > 0:
+                self.sleep(hold / 2)
+                try:
+                    p = self._save_shot(a.screencap_fast(), "drag_mid")
+                    if p:
+                        self.log("info", f"PHS: ảnh chụp GIỮA lúc kéo (đang giữ tay ở quầy): {p}")
+                except Exception:
+                    pass
+                self.sleep(hold / 2)
+            else:
+                self.sleep(hold)
+            last = [ix2, iy2]
+        finally:
+            # LUÔN nhả tay (kể cả khi bấm Dừng / adb lỗi giữa chừng): nếu không, tay ảo còn "giữ" và món bị treo lơ lửng giữa bàn (ảnh người dùng gửi 15/10)
             try:
-                p = self._save_shot(a.screencap_fast(), "drag_mid")
-                if p:
-                    self.log("info", f"PHS: ảnh chụp GIỮA lúc kéo (đang giữ tay ở quầy): {p}")
+                ev("UP", last[0], last[1])
             except Exception:
                 pass
-            self.sleep(hold / 2)
-        else:
-            self.sleep(hold)
-        ev("UP", ix2, iy2)
 
     def run(self) -> bool:
         lost = 0
