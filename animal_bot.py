@@ -86,6 +86,7 @@ Bot auto "Thế Giới Động Vật" (game DI CƯ ĐỘNG VẬT kiểu Neko Sli
   max_moves (0)       - số hiệp tối đa (0 = chạy tới khi thua / bị Dừng)
   max_seconds (0)     - giới hạn thời gian (0 = không giới hạn)
   depth (3) / beam (30) - độ sâu / độ rộng beam search (depth 2 nhanh hơn ~3 lần, hơi kém)
+  depth_crowd (6) / crowd_row (4) - bàn ĐÔNG (thú cao tới hàng <= crowd_row) thì tìm sâu depth_crowd nước thay vì depth (0 = tắt); mô phỏng bull dày: depth 2 chết 1/5 ván, depth 3 sống hết
   settle_s (0.9)      - chờ tối thiểu sau mỗi nước (rồi còn chờ bàn đứng yên: `stable_*`)
   stable_tries (6) / stable_gap (0.35) - khoảng cách giữa 2 lần chụp khi chờ yên (stable_tries giữ cho tương thích, nay giới hạn bằng thời gian)
   stable_max (6.0)    - chờ yên tối đa (giây): đủ cho hàng kín tự ăn + rơi + hàng mới trồi
@@ -536,21 +537,28 @@ def read_score(frame, geo: Optional[Geo] = None):
 
 
 def read_energy(frame, geo: Optional[Geo] = None):
-    """Thanh năng lượng \"1640/1000\" (chữ trắng trên nền xanh) -> (hiện_có, mốc) hoặc None. Đã thử 14 ảnh log: đọc đúng 14/14 ở ngưỡng 200."""
+    """Thanh năng lượng \"1640/1000\" -> (hiện_có, mốc) hoặc None. Chữ TRẮNG khi đủ năng lượng; khi CHƯA đủ thì số hiện có chuyển ĐỎ
+    (18/10: ảnh 4560/6000, 4180/10000, 4470/5000 - bản cũ chỉ lấy chữ trắng nên trả None đúng lúc cần biết có đủ để dùng kỹ năng không).
+    Thử lần lượt: xám ngưỡng 200 (cách cũ, 14/14 ảnh chữ trắng) -> kênh R ngưỡng 170 -> kênh R ngưỡng 150 (chữ đỏ và trắng đều R cao, nền xanh/tối R thấp);
+    bản nào ra đủ dạng \"số/mốc\" thì lấy ngay, hết cách mới dùng nhánh đoán cũ (chỉ đọc được mốc)."""
     try:
         h, w = frame.shape[:2]
         sx = w / REF_W
         x0, y0, x1, y1 = ENERGY_BOX
         c = frame[int(_yb(frame, y0)):int(_yb(frame, y1)), int(x0 * sx):int(x1 * sx)]
-        g = cv2.cvtColor(c, cv2.COLOR_BGR2GRAY)
-        g = cv2.resize(g, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
-        _, t = cv2.threshold(g, 200, 255, cv2.THRESH_BINARY)
-        t = cv2.copyMakeBorder(255 - t, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
-        s = _ocr_bin(t, "--psm 7 -c tessedit_char_whitelist=0123456789/")
-        m = re.match(r"^(\d{1,5})/(\d{3,5})$", s)
-        if m:
-            return int(m.group(1)), int(m.group(2))
-        d = re.sub(r"\D", "", s)
+        chans = (("g", cv2.cvtColor(c, cv2.COLOR_BGR2GRAY), 200), ("r", c[..., 2], 170), ("r", c[..., 2], 150))
+        first = ""
+        for i, (_n, ch, th) in enumerate(chans):
+            g = cv2.resize(ch, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+            _, t = cv2.threshold(g, th, 255, cv2.THRESH_BINARY)
+            t = cv2.copyMakeBorder(255 - t, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
+            s = _ocr_bin(t, "--psm 7 -c tessedit_char_whitelist=0123456789/")
+            if i == 0:
+                first = s
+            m = re.match(r"^(\d{1,5})/(\d{3,5})$", s)
+            if m:
+                return int(m.group(1)), int(m.group(2))
+        d = re.sub(r"\D", "", first)
         for need in ("10000", "5000", "4000", "3000", "2000", "1000"):
             if len(d) > len(need) and d.endswith(need):
                 return int(d[:-len(need)]), int(need)
@@ -1100,7 +1108,7 @@ def skill_candidates(items, kinds):
 
 
 def choose_skill(bars, preview, blocked, kinds, depth=2, beam=20, min_gain=0.0, danger_row=None, freeze_danger=None,
-                 bull_cnt=None, bull_soon=None, cooldown_ok=True, w: Optional[Weights] = None, bear_bull_cells=0):
+                 bull_cnt=None, bull_soon=None, cooldown_ok=True, w: Optional[Weights] = None, bear_bull_cells=0, bear_first=True):
     """Có NÊN dùng kỹ năng lúc này không? CHỈ khi (người dùng chốt 18/10):
       - KẸT  = không còn nước đi hợp lệ nào (hoặc chỉ còn nước đã bị chặn);
       - THUA = mọi nước đi đều làm hàng mới trồi lên chạm thú ở hàng 0 (nước sau chết, `beam_search` depth 1).
@@ -1133,9 +1141,9 @@ def choose_skill(bars, preview, blocked, kinds, depth=2, beam=20, min_gain=0.0, 
                 continue
             val = pts * w.points + s3
         best[k] = (val, cand, DEAD, why)
-    if "K" in best and "K" in kinds:                   # ƯU TIÊN GẤU
+    if bear_first and "K" in best and "K" in kinds:    # ƯU TIÊN GẤU (bear_first=False chỉ để mô phỏng so sánh)
         return best["K"]
-    others = [v for k, v in best.items() if k != "K"]
+    others = [v for k, v in best.items() if (k != "K" or not bear_first)]
     return max(others, key=lambda v: v[0]) if others else None
 
 
@@ -1182,13 +1190,14 @@ class AnimalBot:
                  use_skill=True, skill_kinds="KYPB", skill_gain=400.0, skill_depth=2, skill_cost=1000, freeze_danger=3,
                  skill_x=None, skill_y=None, skill_tap_gap=0.5, skill_wait=1.2, preview_wait=1.6, stable_max=6.0, recheck=True,
                  skill_danger_row=2, bull_soon=3, skill_cooldown=0, skill_confirm_wait=3.0, skill_anim_wait=2.0, target_moves=400, stop_on_death=True, exit_on_stop=True, change_limit=3,
-                 exit_on_max=False, bear_bull_cells=0):
+                 exit_on_max=False, bear_bull_cells=0, depth_crowd=6, crowd_row=4):
         self.adb = adb
         self.log = log or (lambda level, msg: print(f"[{level}] {msg}"))
         self.should_stop = should_stop or (lambda: False)
         self.test, self.debug = bool(test), bool(debug)
         self.max_moves, self.max_seconds = int(max_moves or 0), float(max_seconds or 0)
         self.depth, self.beam = int(depth), int(beam)
+        self.depth_crowd, self.crowd_row = int(depth_crowd or 0), int(crowd_row)   # bàn ĐÔNG (thú cao tới hàng <= crowd_row) thì tìm sâu `depth_crowd` nước (tìm sâu rất rẻ: depth 5 ~0.2s)
         self.settle_s, self.drag_ms = float(settle_s), int(drag_ms)
         self.lost_limit = int(lost_limit)
         self.stable_tries, self.stable_gap = int(stable_tries), float(stable_gap)
@@ -1220,6 +1229,7 @@ class AnimalBot:
         self.preview_wait, self.stable_max = float(preview_wait), float(stable_max)
         self.recheck = bool(recheck)
         self._skill_fail = 0
+        self._skill_fail_move = 0                  # hiệp của lần kỹ năng hụt gần nhất (hụt 3 lần liền thì khoá, nhưng mở lại sau 25 hiệp)
         self._skill_used = 0
         self.skill_danger_row, self.bull_soon = int(skill_danger_row), int(bull_soon)
         self.skill_cooldown = int(skill_cooldown)
@@ -1302,7 +1312,7 @@ class AnimalBot:
         return min((b.row for b in bars), default=ROWS)
 
     def _choose_skill(self, bars, preview, blocked):
-        """Xem `choose_skill` (module): Gấu khi KẸT / THUA / trâu thừa nhiều ô. -> (giá_trị, cand, base_score, lý_do) hoặc None."""
+        """Xem `choose_skill` (module): chỉ khi KẸT / THUA (Gấu ưu tiên trước, rồi kỹ năng giá trị cao nhất). -> (giá_trị, cand, base_score, lý_do) hoặc None."""
         return choose_skill(bars, preview, blocked, self.skill_kinds, depth=self.skill_depth, beam=self.beam, min_gain=self.skill_gain,
                             danger_row=self.skill_danger_row, freeze_danger=self.freeze_danger, bull_cnt=self._bull_cnt,
                             bull_soon=self.bull_soon, cooldown_ok=(self.moves >= self._skill_cd_until), bear_bull_cells=self.bear_bull_cells)
@@ -1545,7 +1555,10 @@ class AnimalBot:
                     fr, geo, cells, bars = self._read_stable()
                     continue
                 t1 = self.now()
-                path, score = beam_search(bars, self.depth, self.beam, preview=preview, blocked=self._blocked)
+                dd = self.depth
+                if self.depth_crowd > dd and bars and min(b.row for b in bars) <= self.crowd_row:
+                    dd = self.depth_crowd
+                path, score = beam_search(bars, dd, self.beam, preview=preview, blocked=self._blocked)
                 if path:
                     r, c0, ln, nc = path[0]
                 else:
@@ -1605,6 +1618,8 @@ class AnimalBot:
                             self._score_log(pending)
                             pending = None
                 # ---- kỹ năng ----
+                if self._skill_fail >= 3 and self.moves - self._skill_fail_move >= 25:
+                    self._skill_fail = 2                              # 3 lần hụt không được khoá kỹ năng cả ván (cứu mạng duy nhất): sau 25 hiệp cho thử lại
                 if (self.use_skill and not self.test and self._energy is not None and self._energy >= self._cost()
                         and self._skill_fail < 3 and self.skill_kinds):
                     ch = self._choose_skill(bars, preview, self._blocked)
@@ -1619,6 +1634,7 @@ class AnimalBot:
                         save_debug(fr, geo, cells, None, tag="skill_truoc", preview=preview)
                         if not self._do_skill(fr, geo, tb):
                             self._skill_fail += 1
+                            self._skill_fail_move = self.moves
                             self.log("warn", f"Animal: kỹ năng không kích hoạt được (không có hộp thoại Xác nhận) {self._skill_fail}/3")
                             fr, geo, cells, bars = self._read_stable()
                             continue
@@ -1645,6 +1661,7 @@ class AnimalBot:
                                         name="skill_log.jsonl")
                         if not changed and not dropped and k != "K":
                             self._skill_fail += 1
+                            self._skill_fail_move = self.moves
                             self.log("warn", f"Animal: kỹ năng KHÔNG có tác dụng (bàn không đổi, năng lượng không giảm) {self._skill_fail}/3")
                         else:
                             self._skill_fail = 0
@@ -1749,6 +1766,7 @@ def run_auto_animal_step(adb, step: dict, should_stop=None, log=None) -> bool:
         skill_confirm_wait=step.get("skill_confirm_wait", 3.0), skill_anim_wait=step.get("skill_anim_wait", 2.0),
         target_moves=step.get("target_moves", 400), exit_on_stop=step.get("exit_on_stop", True), change_limit=step.get("change_limit", 3),
         exit_on_max=step.get("exit_on_max", False), bear_bull_cells=step.get("bear_bull_cells", 0),
+        depth_crowd=step.get("depth_crowd", 6), crowd_row=step.get("crowd_row", 4),
     )
     return bot.run()
 
