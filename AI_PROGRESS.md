@@ -1,5 +1,12 @@
 # AI Progress
 
+## Đợt mới (2026-10-24, Ngưu Ma Vương #23) - SỬA LỒNG MÀU: đi vào lồng lúc chuỗi đang TỰ DO (sau kim cương) thì chuỗi phải mang màu lồng (áp SAU #22 / commit `0d92b43`; sửa `thtg_bot.py` + `thtg_solver.py`)
+
+Người dùng gửi ảnh kế hoạch lượt 2 (map Uy Chấn Thần Sơn - Phần đầu): đường đi 25 (mèo) -> 26, 27 (kim cương) -> 28 (LỒNG ĐỎ hàng 4 cột 5) -> 29 (BÒ) -> 30, 31... : lồng đỏ lại nối thẳng với con bò (sai luật: lồng chỉ nối với thú cùng màu).
+- NGUYÊN NHÂN: `_step` (thtg_bot.py) và nhánh `k == "L"` của DFS trong `thtg_solver.py` chỉ kiểm màu lồng khi chuỗi ĐÃ có màu (`color != -1`). Sau kim cương `color = -1` (tự do) nên lồng lọt qua mà vẫn trả `color = -1` -> con tiếp theo là bất kỳ màu nào, lồng đỏ biến thành "kim cương" đổi màu miễn phí.
+- SỬA: vào lồng khi `color == -1` và lồng có màu thì chuỗi MANG MÀU LỒNG từ đó (`x.color`/`lcol[j]`): ô sau chỉ được cùng màu lồng hoặc kim cương. Lồng màu không rõ (-1) giữ nguyên hành vi cũ (qua được mọi màu). Luật cũ (đang nối màu khác lồng thì bị chặn) không đổi. Cận trên của bộ giải chính xác (L tính chung M) vẫn hợp lệ vì luật mới chặt hơn.
+- Test (sandbox): `_step` tự do + lồng heo -> màu 3, rồi bò bị chặn, heo/kim cương qua; bộ giải chính xác trên bàn thử (kim cương -> lồng đỏ -> chỉ còn bò): BẢN CŨ đi `D, L(đỏ), bò, bò, bò` (lỗi), BẢN SỬA bỏ lồng. CHƯA chạy trên LDPlayer thật. Lưu ý: nếu người dùng thật sự thấy game cho phép đổi màu qua lồng thì báo lại để đảo.
+
 ## Đợt mới (2026-10-23, Ngưu Ma Vương #22) - HẠ NGƯỠNG KHỚP MẪU QUÁI TO 0.50 -> 0.40 + cho chỉnh ngưỡng từ bước (áp SAU #21 / commit `80997d1`, chỉ sửa `thtg_bot.py`)
 
 Người dùng gửi `chua_doc.rar` (5 ảnh gốc do #21 tự lưu) + `thtg.rar` (12 mẫu quái đã cắt tay/bằng lệnh) và báo "có ảnh rồi mà vẫn không đọc được".

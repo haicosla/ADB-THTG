@@ -266,7 +266,8 @@ def solve_exact(grid, hero, w_step=10.0, w_diamond=0.0, count_step_first=False,
             elif k == "D":
                 dfs(j, nm, -1, bal + 1, v, steps + 1, dia + 1)
             elif k == "L":
-                dfs(j, nm, color, bal + 1 - nreal[j], v + val[j], steps + 1, dia)
+                # vào lồng lúc loại còn TỰ DO (color == -1) thì chuỗi mang màu lồng từ đây (giống `_step` trong thtg_bot.py)
+                dfs(j, nm, (lcol[j] if color == -1 else color), bal + 1 - nreal[j], v + val[j], steps + 1, dia)
             else:
                 dfs(j, nm, -1, bal + 1 - nreal[j], v + val[j], steps + 1, dia)
             path.pop()

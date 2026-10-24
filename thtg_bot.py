@@ -9,7 +9,7 @@ Luật (suy từ mô tả + ảnh, các điểm chưa chắc để thành tham s
 - Mỗi ô đi qua +1 bước. Quái to số N: cần đủ N bước tích luỹ, bị trừ N, vẫn +1 bước
   vừa đi (vd 10 bước, quái 7 -> 3, cộng 1 = 4).
 - Ô LỒNG CÓ MÀU (khung xanh/hồng-đỏ/cam/lục tương ứng mèo/heo/bò/ếch; `Cell.color` của ô lồng): đang nối con màu nào thì CHỈ đi qua lồng CÙNG màu
-  (đỏ -> lồng đỏ), đi qua xong vẫn giữ màu đó nối tiếp. Lồng màu không rõ (color = -1) thì qua được mọi màu.
+  (đỏ -> lồng đỏ), đi qua xong vẫn giữ màu đó nối tiếp; vào lồng lúc chuỗi đang TỰ DO (sau kim cương) thì chuỗi mang màu lồng từ đó. Lồng màu không rõ (color = -1) thì qua được mọi màu.
 - Ô LỒNG (khung nhốt viên ngọc, có số ở góc): luôn cần ĐÚNG 5 bước (`CAGE_STEPS`, không đọc số bằng OCR vì hay sai): như quái to, cần đủ 5 bước mới đi qua được (bị trừ 5, vẫn +1 bước);
   nhưng đi qua lồng KHÔNG được đổi loại (giữ nguyên loại thú đang nối). Phá lồng xong nó mở khoá thành kim cương thường
   (từ lúc đó mới đổi loại được) và KHÔNG tính là diệt quái (Cell.mtype == "cage").
@@ -350,7 +350,9 @@ def _step(board: Board, p: SolverParams, r, c, a, b, color, bal, killed_bits):
         if x.mtype == "cage":              # lồng: cần đủ số bước như quái, KHÔNG đổi loại (giữ `color`), không tính diệt;
             if color != -1 and x.color != -1 and x.color != color:
                 return None                # lồng khác màu con đang nối -> không đi qua được
-            return color, bal + 1 - x.n, 0, 0, p.w_cage, 0     # phá xong lồng thành kim cương (chỉ có tác dụng từ lượt sau)
+            # đang ở trạng thái TỰ DO (color == -1, vừa qua kim cương/quái) mà vào lồng có màu -> chuỗi PHẢI mang màu lồng từ đây (ô sau chỉ được cùng màu
+            # đó hoặc kim cương); trước đây giữ -1 nên đường đi lồng ĐỎ rồi nối ngay con NÂU (sai luật)
+            return (x.color if color == -1 else color), bal + 1 - x.n, 0, 0, p.w_cage, 0     # phá xong lồng thành kim cương (chỉ có tác dụng từ lượt sau)
         return -1, bal + 1 - x.n, 1, 0, p.monster_extra(x), 0
     return None   # đá / nhân vật / ô trống không đi được
 
