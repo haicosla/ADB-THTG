@@ -497,7 +497,8 @@ class TaskMixin:
         wg.autosave(win, "tasks_pick_action")
         _bind_esc_close(win)
 
-        tk.Label(win, text="Bấm chọn 1 hoặc NHIỀU Hoạt Động (chạy theo thứ tự chọn), rồi bấm ▶ Chạy:",
+        tk.Label(win, text="Bấm chọn 1 hoặc NHIỀU Hoạt Động (chạy theo thứ tự chọn; bấm LẠI để thêm lần nữa, "
+                           "chuột phải để bớt 1 lần), rồi bấm ▶ Chạy:",
                  bg=COL_PANEL, fg=COL_TEXT, font=("Segoe UI", 10, "bold"), wraplength=440,
                  justify="left").pack(anchor="w", padx=12, pady=(12, 6))
 
@@ -546,10 +547,10 @@ class TaskMixin:
 
         def _refresh_chosen_ui():
             for (kind, key), (btn, base_bg, name) in item_btns.items():
-                i = _find_idx(kind, key)
-                if i >= 0:
+                pos = [i + 1 for i, c in enumerate(chosen) if c[0] == kind and c[1] == key]
+                if pos:
                     btn.bg_color = COL_GREEN
-                    btn.set_text(f"{i + 1}. {name}")
+                    btn.set_text(f"{','.join(map(str, pos))}. {name}")
                 else:
                     btn.bg_color = base_bg
                     btn.set_text(name)
@@ -565,11 +566,17 @@ class TaskMixin:
             btn_run.set_text(f"▶ Chạy ({len(chosen)})")
 
         def _toggle(kind, key, obj=None, name=None):
-            i = _find_idx(kind, key)
-            if i >= 0:
-                chosen.pop(i)
-            elif obj is not None:
+            # Bấm nhiều lần = thêm nhiều lần (1 Hoạt Động chạy lặp được); bỏ bớt bằng chuột phải
+            # (_remove_last) hoặc bấm vào nút trong "Danh sách chạy".
+            if obj is not None:
                 chosen.append((kind, key, obj, name))
+            _refresh_chosen_ui()
+
+        def _remove_last(kind, key):
+            for i in range(len(chosen) - 1, -1, -1):
+                if chosen[i][0] == kind and chosen[i][1] == key:
+                    chosen.pop(i)
+                    break
             _refresh_chosen_ui()
 
         def _clear_all():
@@ -676,6 +683,7 @@ class TaskMixin:
             btn = RoundedButton(flow, name, command=lambda: _toggle(kind, key, obj, name), bg=base_bg,
                                 container_bg=COL_PANEL, font=("Segoe UI", 9, "bold"), padx=10, pady=6)
             flow.add(btn)
+            btn.bind("<Button-3>", lambda e: _remove_last(kind, key), add="+")
             item_btns[(kind, key)] = (btn, base_bg, name)
 
         if action_groups:

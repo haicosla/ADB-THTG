@@ -128,9 +128,15 @@ class RunMixin:
             self.pause_flags.pop(e.index, None)
         self._refresh_run_control_buttons()
 
+        # Một Hoạt Động có thể xuất hiện NHIỀU lần trong `selected` (chọn lặp ở 'Chọn Hành Động Để Chạy')
+        # -> tổng số lượt = số giả lập x số lần xuất hiện, để thanh tiến độ không bị vượt quá tổng.
+        _occ = {}
+        for entry in selected:
+            _tid = entry.get("id") or task_registry.make_task_id(entry.get("file_json", ""))
+            _occ[_tid] = _occ.get(_tid, 0) + 1
         for entry in selected:
             task_id = entry.get("id") or task_registry.make_task_id(entry.get("file_json", ""))
-            self.task_progress[task_id] = {"total": len(selected_emulators), "done": 0, "error": 0, "running": 0, "stopped": 0}
+            self.task_progress[task_id] = {"total": len(selected_emulators) * _occ.get(task_id, 1), "done": 0, "error": 0, "running": 0, "stopped": 0}
             self.task_activity.pop(task_id, None)   # dòng trạng thái ngắn của phiên trước
             lbl = self.task_status_lbl.get(task_id)
             if lbl:

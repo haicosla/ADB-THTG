@@ -1,5 +1,12 @@
 # AI Progress
 
+## Đợt mới (2026-10-24) - "Chọn Hành Động Để Chạy": chọn 1 Hoạt Động/Nhóm NHIỀU LẦN (áp SAU commit origin/main hiện tại)
+
+Người dùng yêu cầu: cửa sổ Chọn Hành Động Để Chạy cho chọn 1 hành động nhiều lần.
+- `dashboard_tasks.py::_open_task_picker`: bấm 1 nút = THÊM 1 lần vào danh sách chạy (trước: bấm lại là bỏ chọn); nút hiện mọi vị trí, vd "1,3. Tên"; chuột phải lên nút = bớt lần chọn gần nhất (`_remove_last`); bấm 1 nút trong "Danh sách chạy" vẫn bỏ đúng mục đó, kéo thả đổi thứ tự như cũ. Nhánh chạy giữ nguyên (nhiều mục -> chạy theo thứ tự, trùng id vẫn chạy lặp).
+- `dashboard_run.py::_start_run`: `task_progress[...]["total"]` = số giả lập x số lần Hoạt Động xuất hiện, để tiến độ/trạng thái không vượt tổng khi 1 Hoạt Động chạy lặp.
+- Test: chỉ py_compile; CHƯA test Tkinter/LDPlayer thật.
+
 ## Đợt mới (2026-10-24, Ngưu Ma Vương #23) - SỬA LỒNG MÀU: đi vào lồng lúc chuỗi đang TỰ DO (sau kim cương) thì chuỗi phải mang màu lồng (áp SAU #22 / commit `0d92b43`; sửa `thtg_bot.py` + `thtg_solver.py`)
 
 Người dùng gửi ảnh kế hoạch lượt 2 (map Uy Chấn Thần Sơn - Phần đầu): đường đi 25 (mèo) -> 26, 27 (kim cương) -> 28 (LỒNG ĐỎ hàng 4 cột 5) -> 29 (BÒ) -> 30, 31... : lồng đỏ lại nối thẳng với con bò (sai luật: lồng chỉ nối với thú cùng màu).
